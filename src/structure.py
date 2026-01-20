@@ -90,7 +90,11 @@ class Lib:
             parent_scope.add_child(self.scope)
 
     def add_node(self, node):
-        self.scope.add_child(node)
+        # Node constructors already register themselves with the scope.
+        # Avoid attempting to add the same node twice.
+        if node.name in self.scope.children:
+            return self.scope.children[node.name]
+        return self.scope.add_child(node)
 
     def called(self, name):
         return self.scope.called(name)
@@ -174,12 +178,10 @@ if __name__ == "__main__":
     stdio = Lib("stdio", main)
 
     # First-class function
-    def double(x):
-        print(f"double called with {x}")
-        return x * 2
-
+    def double(a):
+        print(f"double called with {a}")
+        return a * 2
     printf = Callee("printf", stdio.scope, double)
-    stdio.add_node(printf)
 
     # Values
     x = Callee("x", main, 5)
