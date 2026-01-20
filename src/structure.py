@@ -3,9 +3,12 @@ class Scope:
     def __init__(self, name, parent=None):
         self.name = name
         self.parent = parent
-        self.children = {}  # name → node
+        self.children = {}  # name  node
 
     def add_child(self, node):
+        # avoid accidental overwrites of children
+        if node.name in self.children:
+            raise ValueError(f"Child named `{node.name}` already exists in scope `{self.name}`")
         self.children[node.name] = node
         return node
 
@@ -15,6 +18,7 @@ class Scope:
         if self.parent:
             return self.parent.called(name)
         return None
+
 
 
 class Node:
@@ -36,9 +40,14 @@ class Callee(Node):
         self.value = value
 
     def eval(self, *args, **kwargs):
+        # If value is callable, call it with resolved args.
         if callable(self.value):
             resolved_args = [arg.eval() if isinstance(arg, Node) else arg for arg in args]
             return self.value(*resolved_args)
+        # If value is a Node, evaluate it and return its value.
+        if isinstance(self.value, Node):
+            return self.value.eval()
+        # Otherwise return the literal value.
         return self.value
 
 
@@ -53,10 +62,22 @@ class Caller(Node):
         self.dependencies.append((node, args))
 
     def eval(self):
-        # Start with self.value if numeric, else 0
-        result = self.value if isinstance(self.value, (int, float)) else 0
+        # Evaluate self.value if it's a Node, otherwise start with numeric value or 0.
+        if isinstance(self.value, Node):
+            result = self.value.eval()
+        else:
+            result = self.value if isinstance(self.value, (int, float)) else 0
+
         for node, args in self.dependencies:
-            result += node.eval(*args)
+            target = node
+            # allow dependencies to be recorded by name (string); resolve via scope
+            if isinstance(node, str):
+                target = self.scope.called(node)
+                if target is None:
+                    raise NameError(f"Unknown callee `{node}` in scope `{self.scope.name}`")
+            # evaluate any Node arguments before forwarding
+            resolved_args = [a.eval() if isinstance(a, Node) else a for a in args]
+            result += target.eval(*resolved_args)
         return result
 
 
