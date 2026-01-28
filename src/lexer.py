@@ -120,15 +120,16 @@ def lex_expression(self):
                 break
         self.pos += 1
     value = self.text[start:self.pos].strip()
-    return Token('EXPR', value)
+    return ('EXPR', value)
 
 
 
 def peek(self):
-        index = self.pos
-        token = Tokens[self.pos]
-        index += 1
-        return token
+    for token_type, pattern in Tokens:
+        match = pattern.match(self.text, self.pos)
+        if match:
+            return (token_type, match.group(0))
+    return None
 
 def func_call(self, token):
     tokentype = Tokens[self.pos]
@@ -154,3 +155,20 @@ def get_tokens(string):
             tokens.append(('UNKNOWN', var[0]))
             var = var[1:]
     return tokens
+
+class Lexer:
+    def __init__(self, text):
+        self.text = text
+        self.pos = 0
+        self.tokens = get_tokens(text)
+        self.token_index = 0
+    
+    def peek(self):
+        if self.token_index < len(self.tokens):
+            return self.tokens[self.token_index]
+        return None
+    
+    def next(self):
+        token = self.peek()
+        self.token_index += 1
+        return token

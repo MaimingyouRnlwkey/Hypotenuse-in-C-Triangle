@@ -159,17 +159,17 @@ class Parser:
     # Token helpers
     # -------------------------
 
-    def peek(self) -> Token:
+    def peek(self):
         """Return current token without consuming it."""
         return self.tokens[self.i]
 
-    def advance(self) -> Token:
+    def advance(self):
         """Consume and return current token."""
         tok = self.tokens[self.i]
         self.i += 1
         return tok
 
-    def expect(self, type_name: str) -> Token:
+    def expect(self, type_name: str):
         """Consume token of expected type or raise syntax error."""
         tok = self.peek()
         if tok[0] == type_name:
@@ -178,7 +178,7 @@ class Parser:
             f"Expected {type_name} at pos {tok[2]}, got {tok[0]} ({tok[1]!r})"
         )
 
-    def accept(self, type_name: str) -> Optional[Token]:
+    def accept(self, type_name: str):
         """Consume token if it matches expected type."""
         if self.peek()[0] == type_name:
             return self.advance()
@@ -317,6 +317,13 @@ class Parser:
             self.expect('COLON')
             f = self.parse_conditional()
             return Binary('?:', node, Binary('branch', t, f))
+        return node
+
+    def parse_logical_or(self) -> Node:
+        node = self.parse_assignment()
+        while self.peek()[0] == 'OR':
+            op = self.advance()[1]
+            node = Binary(op, node, self.parse_assignment())
         return node
 
     # Remaining precedence layers intentionally omitted here for brevity
