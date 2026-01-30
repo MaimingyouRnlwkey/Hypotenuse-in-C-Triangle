@@ -1,7 +1,9 @@
-import sys
-import parser as parse
 import argparse
+import sys
+
+import structure
 from lexer import get_tokens
+
 
 def parse_args():
     """Parse command‑line arguments using argparse."""
@@ -10,26 +12,25 @@ def parse_args():
         description="C triangle compiler.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument("files", nargs="*", help="Source file(s) to compile")
     parser.add_argument(
-        "files", nargs="*", help="Source file(s) to compile"
+        "-t", "--tokens", action="store_true", help="Print lexical tokens and exit"
     )
     parser.add_argument(
-        "-t", "--tokens", action="store_true",
-        help="Print lexical tokens and exit"
+        "-o",
+        "--output",
+        metavar="PATH",
+        help="Write compiled output to PATH (not yet implemented)",
     )
     parser.add_argument(
-        "-o", "--output", metavar="PATH",
-        help="Write compiled output to PATH (not yet implemented)"
-    )
-    parser.add_argument(
-        "-a", "--asm", action="store_true",
-        help="Show generated assembly"
+        "-a", "--asm", action="store_true", help="Show generated assembly"
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
     # -------------------------------------------------
     #  Token‑only mode (-t / --tokens)
     # -------------------------------------------------
@@ -42,12 +43,14 @@ def main():
                 content = file.read()
             tokens = get_tokens(content)
             print(tokens)
-            tokens.append(('EOF', 'EOF'))
-            parse.main(tokens)
+            tokens.append(("EOF", "EOF"))
+            # Use Structure module to handle the token list.
+            struct = structure.Structor(tokens, None)
+            struct.build_and_sort()
+            print("Structure instance created (token‑only mode):", struct)
         except FileNotFoundError:
             print(f"Error: file not found {args.files[0]}")
             sys.exit(1)
-        print(tokens)
         sys.exit(0)
 
     # -------------------------------------------------
@@ -62,8 +65,11 @@ def main():
             with open(path, "r") as file:
                 content = file.read()
             tokens = get_tokens(content)
-            tokens.append(('EOF', 'EOF'))
-            parse.main(tokens)
+            tokens.append(("EOF", "EOF"))
+            # Use Structure module for each file's token stream.
+            struct = structure.Structor(tokens, None)
+            struct.build_and_sort()
+            print(f"Structure instance created for {path}:", struct)
         except FileNotFoundError:
             print(f"Error: file not found {path}")
             sys.exit(1)

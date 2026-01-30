@@ -1,11 +1,8 @@
-import parser as p
-
-
 class Scope:
     def __init__(self, name, parent=None):
         self.name = name
         self.parent = parent
-        self.children = {}  # name  node
+        self.children = {}  # name → node
 
     def add_child(self, node):
         # avoid accidental overwrites of children
@@ -22,6 +19,7 @@ class Scope:
         if self.parent:
             return self.parent.called(name)
         return None
+
 
 class Node:
     """Base node for values and dependencies."""
@@ -95,7 +93,7 @@ class Lib:
 
     def __init__(self, name, parent_scope=None):
         self.name = name
-        self.scope = Scope(name, parent=parent_scope)
+        self.scope = Scope(name, parent_scope)
         if parent_scope:
             parent_scope.add_child(self.scope)
 
@@ -111,12 +109,17 @@ class Lib:
 
 
 class Structor:
-    """Used for automatically structuring each line of code."""
+    """Automatically structures each line of code.
 
-    def __init__(self, tokens_array):
+    The parser implementation is injected via the ``parser`` argument to the
+    constructor, removing the need for a hard‑coded import.
+    """
+
+    def __init__(self, tokens_array, parser):
         self.tokens = tokens_array
         self.pos = 0
         self.objects = {}
+        self.parser = parser  # injected parser module/object
 
     def peek(self):
         return self.tokens[self.pos] if self.pos < len(self.tokens) else None
@@ -128,7 +131,7 @@ class Structor:
 
     def match(self, *types):
         tok = self.peek()
-        if tok and tok.type in types:
+        if tok and getattr(tok, "type", None) in types:
             return self.advance()
         return None
 
@@ -136,10 +139,10 @@ class Structor:
     def collect_args(self):
         """Collect function‑call arguments and return a list of parsed AST nodes.
 
-        Tokens are gathered until a matching RPAREN is found.  The raw token
-        list for each argument (separated by commas) is fed to ``p.Parser`` and
-        ``parse_expression`` is invoked, so the caller receives fully parsed
-        expression objects rather than raw strings.
+        Tokens are gathered until a matching RPAREN is found. The raw token
+        list for each argument (separated by commas) is fed to the injected
+        parser's ``Parser`` class and ``parse_expression`` is invoked, so the
+        caller receives fully parsed expression objects rather than raw strings.
         """
         raw_args = []  # List of token lists, one per argument
         current = []
@@ -160,12 +163,12 @@ class Structor:
         # Consume the closing RPAREN.
         if self.peek() == "RPAREN":
             self.advance()
-        # Parse each argument token slice into an AST node using the existing parser.
+        # Parse each argument token slice into an AST node using the injected parser.
         parsed_args = []
         for arg_tokens in raw_args:
             if not arg_tokens:
                 continue
-            parser_instance = p.Parser(arg_tokens)
+            parser_instance = self.parser.Parser(arg_tokens)
             parsed_args.append(parser_instance.parse_expression())
         return parsed_args
 
@@ -208,7 +211,7 @@ class Structor:
 
             if typ == "IDENTIFIER":
                 name = val
-                self.advance()                       # consume identifier
+                self.advance()  # consume identifier
                 nxt = self.peek()
                 nxt_type = _type(nxt)
 
@@ -216,7 +219,7 @@ class Structor:
                 # 1. Variable/value definition: IDENTIFIER ASSIGN expr SEMICOLON
                 # -------------------------------------------------
                 if nxt_type == "ASSIGN":
-                    self.advance()                   # consume '='
+                    self.advance()  # consume '='
                     expr_tokens = []
                     while True:
                         nxt_tok = self.peek()
@@ -226,8 +229,8 @@ class Structor:
                     # Consume trailing semicolon if present.
                     if _type(self.peek()) == "SEMICOLON":
                         self.advance()
-                    # Parse the expression using the full parser.
-                    expr_ast = p.Parser(expr_tokens).parse_expression()
+                    # Parse the expression using the injected parser.
+                    expr_ast = self.parser.Parser(expr_tokens).parse_expression()
                     callee_node = Callee(name, program, expr_ast)
                     self.objects[name] = callee_node
                     self._order.setdefault(name, self.pos)
@@ -237,8 +240,8 @@ class Structor:
                 # 2. Function‑like call: IDENTIFIER LPAREN ... RPAREN
                 # -------------------------------------------------
                 if nxt_type == "LPAREN":
-                    self.advance()                   # consume '('
-                    args = self.collect_args()       # returns parsed AST nodes
+                    self.advance()  # consume '('
+                    args = self.collect_args()  # returns parsed AST nodes
                     # Resolve (or lazily create) the callee.
                     callee_node = self.objects.get(name)
                     if callee_node is None:
