@@ -11,52 +11,59 @@ a structured AST suitable for semantic analysis or code generation.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Any, Tuple
-from lexer import Tokens as Token
+from typing import Any, List, Optional, Tuple
 
+from lexer import Tokens as Token
 
 # ============================================================
 # AST (Abstract Syntax Tree) Nodes
 # ============================================================
 
+
 @dataclass
 class Node:
     """Base class for all AST nodes."""
+
     pass
 
 
 @dataclass
 class Program(Node):
     """Root of the AST: list of top-level declarations."""
+
     declarations: List[Node]
 
 
 @dataclass
 class Function(Node):
     """Function definition."""
-    ret_type: str                    # Return type
-    name: str                        # Function identifier
-    params: List[Tuple[str, str]]    # (type, name) parameter list
-    body: Node                       # Function body (Compound)
+
+    ret_type: str  # Return type
+    name: str  # Function identifier
+    params: List[Tuple[str, str]]  # (type, name) parameter list
+    body: Node  # Function body (Compound)
 
 
 @dataclass
 class Declaration(Node):
     """Variable declaration or function prototype."""
+
     var_type: str
     name: str
-    initializer: Optional[Node]      # Optional initializer expression
+    initializer: Optional[Node]  # Optional initializer expression
 
 
 @dataclass
 class Compound(Node):
     """Block scope: { statement* }"""
+
     stmts: List[Node]
 
 
 @dataclass
 class If(Node):
     """If / else control structure."""
+
     cond: Node
     then_branch: Node
     else_branch: Optional[Node]
@@ -65,6 +72,7 @@ class If(Node):
 @dataclass
 class While(Node):
     """While loop."""
+
     cond: Node
     body: Node
 
@@ -72,6 +80,7 @@ class While(Node):
 @dataclass
 class For(Node):
     """For loop with optional init, condition, and post expressions."""
+
     init: Optional[Node]
     cond: Optional[Node]
     post: Optional[Node]
@@ -81,18 +90,21 @@ class For(Node):
 @dataclass
 class Return(Node):
     """Return statement."""
+
     expr: Optional[Node]
 
 
 @dataclass
 class ExprStmt(Node):
     """Expression used as a statement."""
+
     expr: Optional[Node]
 
 
 @dataclass
 class Binary(Node):
     """Binary operation node."""
+
     op: str
     left: Node
     right: Node
@@ -101,6 +113,7 @@ class Binary(Node):
 @dataclass
 class Unary(Node):
     """Unary operation (prefix or postfix)."""
+
     op: str
     operand: Node
     prefix: bool = True
@@ -109,18 +122,21 @@ class Unary(Node):
 @dataclass
 class Literal(Node):
     """Literal constant."""
+
     value: Any
 
 
 @dataclass
 class Var(Node):
     """Variable reference."""
+
     name: str
 
 
 @dataclass
 class Assignment(Node):
     """Assignment expression."""
+
     target: Node
     value: Node
 
@@ -128,6 +144,7 @@ class Assignment(Node):
 @dataclass
 class Call(Node):
     """Function call."""
+
     callee: Node
     args: List[Node]
 
@@ -135,6 +152,7 @@ class Call(Node):
 @dataclass
 class ArrayAccess(Node):
     """Array indexing expression."""
+
     array: Node
     index: Node
 
@@ -142,6 +160,7 @@ class ArrayAccess(Node):
 # ============================================================
 # Recursive-Descent Parser
 # ============================================================
+
 
 class Parser:
     """
@@ -152,8 +171,8 @@ class Parser:
 
     def __init__(self, tokens, var=None):
         self.tokens = tokens
-        self.i = 0                    # Current token index
-        self.var = var                # Optional external state
+        self.i = 0  # Current token index
+        self.var = var  # Optional external state
 
     # -------------------------
     # Token helpers
@@ -191,7 +210,7 @@ class Parser:
     def parse_program(self) -> Program:
         """Parse entire translation unit."""
         decls = []
-        while self.peek()[0] != 'EOF':
+        while self.peek()[0] != "EOF":
             decls.append(self.parse_external())
         return Program(decls)
 
@@ -203,38 +222,61 @@ class Parser:
         - Global variables
         """
         t = self.peek()
-
         if t[0] in (
-            'INT','CHAR','VOID','FLOAT','DOUBLE','LONG','SHORT',
-            'SIGNED','UNSIGNED','STRUCT','UNION','ENUM','BOOLEAN'
+            "INT",
+            "CHAR",
+            "VOID",
+            "FLOAT",
+            "DOUBLE",
+            "SHORT",
+            "LONG",
+            "SIGNED",
+            "UNSIGNED",
+            "STRUCT",
+            "UNION",
+            "ENUM",
+            "TYPEDEF",
+            "CONST",
+            "VOLATILE",
+            "STATIC",
+            "EXTERN",
+            "INLINE",
+            "REGISTER",
+            "AUTO",
+            "SIZEOF",
+            "RESTRICT",
+            "BOOLEAN",
+            "UNKNOWN",
+            "COMMENT_MULTI",
+            "COMMENT_LINE",
         ):
             typ = self.advance()[1]
-            name = self.expect('IDENTIFIER')[1]
+            name = self.expect("IDENTIFIER")[1]
 
             # Function or prototype
-            if self.accept('LPAREN'):
+            if self.accept("LPAREN"):
                 params = []
 
-                if not self.accept('RPAREN'):
+                if not self.accept("RPAREN"):
                     while True:
                         ptype = self.advance()[1]
-                        pname = self.expect('IDENTIFIER')[1]
+                        pname = self.expect("IDENTIFIER")[1]
                         params.append((ptype, pname))
-                        if self.accept('COMMA'):
+                        if self.accept("COMMA"):
                             continue
-                        self.expect('RPAREN')
+                        self.expect("RPAREN")
                         break
 
                 # Function definition vs prototype
-                if self.peek()[0] == 'LBRACE':
+                if self.peek()[0] == "LBRACE":
                     return Function(typ, name, params, self.parse_compound())
                 else:
-                    self.expect('SEMICOLON')
+                    self.expect("SEMICOLON")
                     return Declaration(f"{typ} (func prototype)", name, None)
 
             # Global variable
-            init = self.parse_expression() if self.accept('ASSIGN') else None
-            self.expect('SEMICOLON')
+            init = self.parse_expression() if self.accept("ASSIGN") else None
+            self.expect("SEMICOLON")
             return Declaration(typ, name, init)
 
         raise SyntaxError(f"Unexpected token at top-level: {t}")
@@ -247,54 +289,65 @@ class Parser:
         """Parse a single statement."""
         t = self.peek()
 
-        if t[0] == 'LBRACE':
+        if t[0] == "LBRACE":
             return self.parse_compound()
 
-        if t[0] == 'IF':
+        if t[0] == "IF":
             self.advance()
-            self.expect('LPAREN')
+            self.expect("LPAREN")
             cond = self.parse_expression()
-            self.expect('RPAREN')
+            self.expect("RPAREN")
             then_branch = self.parse_statement()
-            else_branch = self.parse_statement() if self.accept('ELSE') else None
+            else_branch = self.parse_statement() if self.accept("ELSE") else None
             return If(cond, then_branch, else_branch)
 
-        if t[0] == 'WHILE':
+        if t[0] == "WHILE":
             self.advance()
-            self.expect('LPAREN')
+            self.expect("LPAREN")
             cond = self.parse_expression()
-            self.expect('RPAREN')
+            self.expect("RPAREN")
             return While(cond, self.parse_statement())
 
-        if t[0] == 'RETURN':
+        if t[0] == "RETURN":
             self.advance()
-            expr = self.parse_expression() if self.peek()[0] != 'SEMICOLON' else None
-            self.expect('SEMICOLON')
+            expr = self.parse_expression() if self.peek()[0] != "SEMICOLON" else None
+            self.expect("SEMICOLON")
             return Return(expr)
 
         # Local declaration
         if t[0] in (
-            'INT','CHAR','VOID','FLOAT','DOUBLE','LONG','SHORT',
-            'SIGNED','UNSIGNED','STRUCT','UNION','ENUM','BOOLEAN'
+            "INT",
+            "CHAR",
+            "VOID",
+            "FLOAT",
+            "DOUBLE",
+            "LONG",
+            "SHORT",
+            "SIGNED",
+            "UNSIGNED",
+            "STRUCT",
+            "UNION",
+            "ENUM",
+            "BOOLEAN",
         ):
             typ = self.advance()[1]
-            name = self.expect('IDENTIFIER')[1]
-            init = self.parse_expression() if self.accept('ASSIGN') else None
-            self.expect('SEMICOLON')
+            name = self.expect("IDENTIFIER")[1]
+            init = self.parse_expression() if self.accept("ASSIGN") else None
+            self.expect("SEMICOLON")
             return Declaration(typ, name, init)
 
         # Expression statement
-        expr = self.parse_expression() if self.peek()[0] != 'SEMICOLON' else None
-        self.expect('SEMICOLON')
+        expr = self.parse_expression() if self.peek()[0] != "SEMICOLON" else None
+        self.expect("SEMICOLON")
         return ExprStmt(expr)
 
     def parse_compound(self) -> Compound:
         """Parse a block scope."""
-        self.expect('LBRACE')
+        self.expect("LBRACE")
         stmts = []
-        while self.peek()[0] != 'RBRACE':
+        while self.peek()[0] != "RBRACE":
             stmts.append(self.parse_statement())
-        self.expect('RBRACE')
+        self.expect("RBRACE")
         return Compound(stmts)
 
     # ============================================================
@@ -306,17 +359,24 @@ class Parser:
 
     def parse_assignment(self) -> Node:
         node = self.parse_conditional()
-        if self.accept('ASSIGN'):
+        if self.accept("ASSIGN"):
             return Assignment(node, self.parse_assignment())
         return node
 
     def parse_conditional(self) -> Node:
         node = self.parse_logical_or()
-        if self.accept('QUESTION'):
+        if self.accept("QUESTION"):
             t = self.parse_expression()
-            self.expect('COLON')
+            self.expect("COLON")
             f = self.parse_conditional()
-            return Binary('?:', node, Binary('branch', t, f))
+            return Binary("?:", node, Binary("branch", t, f))
+        return node
+
+    def parse_logical_or(self) -> Node:
+        node = self.parse_assignment()
+        while self.peek()[0] == "OR":
+            op = self.advance()[1]
+            node = Binary(op, node, self.parse_assignment())
         return node
 
     def parse_logical_or(self) -> Node:
@@ -329,19 +389,22 @@ class Parser:
     # Remaining precedence layers intentionally omitted here for brevity
     # (they are identical to your original implementation)
 
+
 # ============================================================
 # AST Pretty Printer
 # ============================================================
 
+
 def pretty(node: Node, indent: int = 0) -> str:
     """Human-readable AST dump."""
-    pad = '  ' * indent
+    pad = "  " * indent
     return pad + repr(node) + "\n"
 
 
 # ============================================================
 # Entry point
 # ============================================================
+
 
 def main(tokens):
     """Parse tokens and print AST."""
