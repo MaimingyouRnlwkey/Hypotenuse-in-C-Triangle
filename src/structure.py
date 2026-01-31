@@ -2,9 +2,6 @@ class Scope:
     def __init__(self, name, parent=None):
         self.name = name
         self.parent = parent
-<<<<<<< Updated upstream
-        self.children = {}  # name → node
-=======
         self.children = {}  # generic children (non‑Callee/Caller)
         self.callees = {}  # name → Callee objects
         self.callers = {}  # name → Caller objects
@@ -13,7 +10,6 @@ class Scope:
         """Readable representation showing the scope name and its parent."""
         parent_name = self.parent.name if self.parent else None
         return f"Scope(name={self.name!r}, parent={parent_name!r})"
->>>>>>> Stashed changes
 
     def add_child(self, node):
         """Register a node in the appropriate collection.

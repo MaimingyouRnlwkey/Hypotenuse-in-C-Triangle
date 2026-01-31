@@ -390,10 +390,6 @@ class Parser:
             left = Binary(op, left, right)
         return left
 
-<<<<<<< Updated upstream
-    # Remaining precedence layers intentionally omitted here for brevity
-    # (they are identical to your original implementation)
-=======
     # -----------------------------------------------------------------
     # Primary expression helper (identifiers, literals, parenthesised expr)
     # -----------------------------------------------------------------
@@ -413,7 +409,6 @@ class Parser:
             self.expect("RPAREN")
             return expr
         raise SyntaxError(f"Unexpected token {tok} in primary expression")
->>>>>>> Stashed changes
 
 
 # ============================================================
