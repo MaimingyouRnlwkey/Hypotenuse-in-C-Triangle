@@ -49,6 +49,7 @@ class Scope:
         return None
 
 
+
 class Node:
     """Base node for values and dependencies."""
 
@@ -133,17 +134,7 @@ class Caller(Node):
             result = self.value if isinstance(self.value, (int, float)) else 0
 
         for node, args in self.dependencies:
-            target = node
-            # allow dependencies to be recorded by name (string); resolve via scope
-            if isinstance(node, str):
-                target = self.scope.called(node)
-                if target is None:
-                    raise NameError(
-                        f"Unknown callee `{node}` in scope `{self.scope.name}`"
-                    )
-            # evaluate any Node arguments before forwarding
-            resolved_args = [a.eval() if isinstance(a, Node) else a for a in args]
-            result += target.eval(*resolved_args)
+            result += node.eval(*args)
         return result
 
 
@@ -355,9 +346,9 @@ if __name__ == "__main__":
     stdio = Lib("stdio", main)
 
     # First-class function
-    def double(a):
-        print(f"double called with {a}")
-        return a * 2
+    def double(x):
+        print(f"double called with {x}")
+        return x * 2
 
     printf = Callee("printf", stdio.scope, double)
 
