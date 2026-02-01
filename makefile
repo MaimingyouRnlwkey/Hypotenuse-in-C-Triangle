@@ -1,7 +1,7 @@
 .PHONY: run install
 
 run: install
-	./hypotenuse $(ARGS)
+	python3 src/main.py -t $(CURDIR)/test/ex.ctri
 
 install:
 
