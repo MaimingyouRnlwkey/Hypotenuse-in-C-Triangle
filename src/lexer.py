@@ -46,6 +46,7 @@ Tokens = [
     ("BOOLEAN", re.compile(r"\b_Bool\b")),
     # DATA TYPES
     ("STRING_LITERAL", re.compile(r'"(?:\\.|[^"\\])*"')),
+    ("CHAR_LITERAL", re.compile(r"'(?:\\.|[^'\\])*'")),
     ("FLOAT_LITERAL", re.compile(r"\b\d+\.\d+\b")),
     ("INT_LITERAL", re.compile(r"\b\d+\b")),
     # OPERATORS AND DELIMITERS AND SYMBOLS
@@ -127,7 +128,7 @@ class Lexer:
         while self.pos < len(self.text):
             c = self.text[self.pos]
             if in_string:
-                if c == "\\\\":
+                if c == "\\":
                     self.pos += 2
                     continue
                 if c == in_string:
