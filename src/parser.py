@@ -202,6 +202,16 @@ class Parser:
         if self.peek()[0] == type_name:
             return self.advance()
         return None
+    
+    def parse_unary(self):
+        """Parse unary prefix expression (e.g., -x, !y)."""
+        #checks if current token is a unary operator
+        token = self.peek()
+        if token[0] in ("PLUS", "MINUS", "NOT"):
+            op = self.advance()[1]
+            operand = self.parse_unary()
+            return Unary(op=op, operand=operand, prefix=True)
+        return self.parse_primary()
 
     # ============================================================
     # Top-level parsing
@@ -383,10 +393,15 @@ class Parser:
         (identifier, literal, or parenthesised sub‑expression) for each side,
         breaking the recursion while preserving operator precedence.
         """
-        left = self.parse_primary()
+        """^^^^^above comments are old edits"""
+        """
+        Old order: Logical OR -> Primary
+        New order: Logical OR -> Unary -> Primary
+        """
+        left = self.parse_unary()
         while self.peek()[0] == "OR":
             op = self.advance()[1]
-            right = self.parse_primary()
+            right = self.parse_unary()
             left = Binary(op, left, right)
         return left
 
