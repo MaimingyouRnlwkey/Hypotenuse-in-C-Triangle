@@ -5,7 +5,6 @@ import parser as p
 import structure
 
 
-
 def parse_args():
     """Parse command‑line arguments using argparse."""
     parser = argparse.ArgumentParser(
