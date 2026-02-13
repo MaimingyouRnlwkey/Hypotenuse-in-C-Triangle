@@ -1,8 +1,9 @@
 import argparse
 import sys
-
+import lexer
+import parser as p
 import structure
-from lexer import get_tokens
+
 
 
 def parse_args():
@@ -41,13 +42,18 @@ def main():
         try:
             with open(args.files[0], "r") as file:
                 content = file.read()
-            tokens = get_tokens(content)
-            print(tokens)
+            tokenizer = lexer.Lexer(content)
+            tokens = tokenizer.lex()
             tokens.append(("EOF", "EOF"))
+
             # Use Structure module to handle the token list.
-            struct = structure.Structor(tokens, None)
-            struct.build_and_sort()
-            print("Structure instance created (token‑only mode):", struct)
+            # Use the real parser module (which now has the recursion bug fixed).
+            parser = p
+            struct = structure.Structor(tokens, parser)
+            objects = struct.build_and_sort()
+            print(tokens)
+            print("Objects (including parent scopes):", objects)
+            return objects
         except FileNotFoundError:
             print(f"Error: file not found {args.files[0]}")
             sys.exit(1)
@@ -59,17 +65,21 @@ def main():
     if not args.files:
         print("Error: no input file provided")
         sys.exit(1)
-
     for path in args.files:
         try:
             with open(path, "r") as file:
                 content = file.read()
-            tokens = get_tokens(content)
+            tokenizer = lexer.Lexer(content)
+            tokens = tokenizer.lex()
             tokens.append(("EOF", "EOF"))
+
+            # Pass the parser module for consistency.
+            parser = p
             # Use Structure module for each file's token stream.
-            struct = structure.Structor(tokens, None)
-            struct.build_and_sort()
-            print(f"Structure instance created for {path}:", struct)
+            struct = structure.Structor(tokens, parser)
+            objects = struct.build_and_sort()
+            print("Objects (including parent scopes):", objects)
+            return objects
         except FileNotFoundError:
             print(f"Error: file not found {path}")
             sys.exit(1)
@@ -84,5 +94,4 @@ def main():
             sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
+main()
