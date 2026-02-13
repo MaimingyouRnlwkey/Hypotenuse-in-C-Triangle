@@ -1,9 +1,9 @@
 import argparse
 import sys
-
 import lexer
 import parser as p
 import structure
+
 
 
 def parse_args():
@@ -31,6 +31,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+
     # -------------------------------------------------
     #  Token‑only mode (-t / --tokens)
     # -------------------------------------------------
