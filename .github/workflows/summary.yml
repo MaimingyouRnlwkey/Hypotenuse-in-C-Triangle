@@ -60,6 +60,9 @@ jobs:
           if [ -z "$SUMMARY" ] || [[ "$SUMMARY" == *"failed"* ]]; then
             BODY="⚠️ AI summary could not be generated (check Ollama Cloud key/model/quota)."
           else
-            BODY="**AI Summary (Ollama Cloud – qwen3.5:397b-cloud)**\n\n${SUMMARY}"
+            BODY="# ${SUMMARY}
+
+            **btw you js suck lil bro**
+            "
           fi
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
