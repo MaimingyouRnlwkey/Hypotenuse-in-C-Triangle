@@ -27,3 +27,4 @@ jobs:
           OCO_MODEL: llama3
         run: |
           oco --yes
+          oco --yes
