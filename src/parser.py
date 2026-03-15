@@ -416,6 +416,14 @@ class Parser:
             return Unary(op=op, operand=operand, prefix=True)
         return self.parse_primary()
 
+    def parse_power(self) -> Node:
+        """Parse exponentiation expressions (right-associative)."""
+        left = self.parse_unary()
+        if self.accept("POWER"):
+            right = self.parse_power()  # Right-associative
+            return Binary("**", left, right)
+        return left
+
     # -----------------------------------------------------------------
     # Primary expression helper (identifiers, literals, parenthesised expr)
     # -----------------------------------------------------------------
@@ -435,6 +443,7 @@ class Parser:
             self.expect("RPAREN")
             return expr
         raise SyntaxError(f"Unexpected token {tok} in primary expression")
+
 
 
 # ============================================================

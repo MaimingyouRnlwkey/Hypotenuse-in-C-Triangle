@@ -56,6 +56,7 @@ Tokens = [
     ("MINUS", re.compile(r"-")),
     ("MULTIPLY", re.compile(r"\*")),
     ("DIVIDE", re.compile(r"/")),
+    ("POWER", re.compile(r"\*\*")),
     ("LPAREN", re.compile(r"\(")),
     ("RPAREN", re.compile(r"\)")),
     ("ASSIGN", re.compile(r"=")),
