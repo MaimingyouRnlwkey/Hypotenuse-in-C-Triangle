@@ -1,9 +1,4 @@
 # .github/labeler.yml
-
-bug:
-  - '**/*.py'
-  - '**/*.ctri'
-
 documentation:
   - '**/*.md'
   - '**/*.txt'
@@ -12,10 +7,6 @@ enhancement:
   - '**/*.py'
   - '**/*.ctri'
   - 'Makefile'
-
-help wanted:
-  - '**/*.py'
-  - '**/*.ctri'
 
 update/addition:
   - '**/*.py'
