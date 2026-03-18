@@ -261,6 +261,7 @@ class Parser:
             "EXTERN",
             "INLINE",
             "REGISTER",
+            "AUTO",
             "SIZEOF",
             "RESTRICT",
             "BOOLEAN",
