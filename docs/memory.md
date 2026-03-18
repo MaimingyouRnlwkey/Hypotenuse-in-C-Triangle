@@ -32,6 +32,7 @@ allocate type name [size] // cannot be assigned a value when size is being decla
 |---|---|
 | `allocate int x` | Allocate one `int` on the heap |
 | `allocate int buf [256]` | Allocate 256 `int`s on the heap |
+| `allocate int big (256)` | Allocate a 256 bit `int` on the heap |
 | `allocate string msg` | Allocate one `string` on the heap |
 
 ### Examples
