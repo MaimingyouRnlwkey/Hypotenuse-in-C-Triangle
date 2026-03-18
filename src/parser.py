@@ -222,6 +222,27 @@ class Parser:
         - Global variables
         """
         t = self.peek()
+        #Deprecated keyword error handler for replaced/useless keywords
+        #REMOVE MULTILINE COMMENTS FOR THIS WHEN THESE ARE REPLACED/DEPRECATED FULLY
+        """if t[0] in (
+            "RESTRICT",
+            "BOOLEAN",
+            "COMPLEX",
+            "IMAGINARY",
+            "C11",
+            "AUTO",
+        ):
+            raise SyntaxError(
+                f"Deprecated keyword used! Please remove or replace the keyword. "
+                f"Found '{t[0]}'."
+            ) """
+        # COMMENTS ARE SKIPPED
+        if t[0] in (
+            "COMMENT_MULTI",
+            "COMMENT_LINE",
+        ):
+            self.advance()
+            return self.parse_external()
         if t[0] in (
             "INT",
             "CHAR",
@@ -247,12 +268,17 @@ class Parser:
             "RESTRICT",
             "BOOLEAN",
             "UNKNOWN",
-            "COMMENT_MULTI",
-            "COMMENT_LINE",
         ):
             typ = self.advance()[1]
-            name = self.expect("IDENTIFIER")[1]
-
+            # Expected Identifier error handling            
+            if self.peek()[0] != "IDENTIFIER":
+                bad_tok = self.peek()
+                raise SyntaxError(
+                    f"Expected identifier. "
+                    f"Declaration keyword '{typ}' was followed by a non-identifier token. "
+                    f"Got '{bad_tok[0]}'."
+                )
+            name = self.advance()[1]
             # Function or prototype
             if self.accept("LPAREN"):
                 params = []
@@ -315,6 +341,20 @@ class Parser:
             return Return(expr)
 
         # Local declaration
+        #Deprecated keyword error handler for replaced/useless keywords
+        #REMOVE MULTILINE COMMENTS FOR THIS WHEN THESE ARE REPLACED/DEPRECATED FULLY
+        """if t[0] in (
+            "RESTRICT",
+            "BOOLEAN",
+            "COMPLEX",
+            "IMAGINARY",
+            "C11",
+            "AUTO",
+        ):
+            raise SyntaxError(
+                f"Deprecated keyword used! Please remove or replace the keyword. "
+                f"Found '{t[0]}'."
+            )"""
         if t[0] in (
             "INT",
             "CHAR",
@@ -328,10 +368,16 @@ class Parser:
             "STRUCT",
             "UNION",
             "ENUM",
-            "BOOLEAN",
         ):
             typ = self.advance()[1]
-            name = self.expect("IDENTIFIER")[1]
+            if self.peek()[0] != "IDENTIFIER":
+                bad_tok = self.peek()
+                raise SyntaxError(
+                    f"Expected identifier. "
+                    f"Declaration keyword '{typ}' was followed by a non-identifier token. "
+                    f"Got '{bad_tok[0]}'."
+                )
+            name = self.advance()[1]
             init = self.parse_expression() if self.accept("ASSIGN") else None
             self.expect("SEMICOLON")
             return Declaration(typ, name, init)
