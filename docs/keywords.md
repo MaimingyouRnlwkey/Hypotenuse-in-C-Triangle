@@ -66,7 +66,7 @@ These keywords are removed from C△ and will cause a compiler error if used.
 
 | Keyword | Description |
 |---|---|
-| `auto` | Dynamic type — inference at compile time, dynamic at runtime, usable as parameter type, return type, and variadic via `auto...` or `auto args*` |
+| `auto` | Dynamic type — inference at compile time, dynamic at runtime, usable as parameter type, return type, and variadic via `auto args*` |
 | `string` | Native string type — dynamic char* with length and capacity |
 | `dynam` | Dynamic array — `dynam int arr = [1,2,3]`, supports `.push()`, `.pop()`, `.remove()` |
 | `tuple` | Dynamic tuple — `tuple t = [1, "hello", 3.14]`, indexable, mixed types |
@@ -76,7 +76,7 @@ These keywords are removed from C△ and will cause a compiler error if used.
 
 | Keyword | Description |
 |---|---|
-| `allocate` | Heap allocation with optional custom size — `allocate int x [256]` |
+| `allocate` | Heap allocation with optional custom size — `allocate int x (256)` |
 | `free` | Manual heap deallocation |
 | `autoremove` | Auto free at last use — `autoremove allocate int* ptr = &x` — compiler simulation pass finds last use |
 
