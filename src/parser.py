@@ -368,6 +368,7 @@ class Parser:
             "STRUCT",
             "UNION",
             "ENUM",
+            "BOOLEAN",
         ):
             typ = self.advance()[1]
             if self.peek()[0] != "IDENTIFIER":
