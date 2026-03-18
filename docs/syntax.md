@@ -109,7 +109,7 @@ int result = add(5, 10);    // 15
 Return type is inferred from the expression.
 
 ```c
-int lamb add(int a, int b) = a + b;
+lamb add(int a, int b) = a + b; // assumed to be an int from expression and input
 ```
 
 ---
