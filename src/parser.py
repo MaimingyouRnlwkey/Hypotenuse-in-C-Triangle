@@ -229,7 +229,6 @@ class Parser:
             "BOOLEAN",
             "COMPLEX",
             "IMAGINARY",
-            "C11 AUTO",
         ):
             raise SyntaxError(
                 f"Deprecated keyword used! Please remove or replace the keyword. "
@@ -346,7 +345,6 @@ class Parser:
             "BOOLEAN",
             "COMPLEX",
             "IMAGINARY",
-            "C11 AUTO",
         ):
             raise SyntaxError(
                 f"Deprecated keyword used! Please remove or replace the keyword. "
