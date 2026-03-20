@@ -298,7 +298,20 @@ name.raw;                 // access underlying char* for C interop
 
 ---
 
-## 7. Memory Management
+## 7. len() Length function
+
+```c
+int main() {
+    tuple list = [1,"e",4];
+    int x = len(list); // should be 3
+}
+```
+- The `len()` function assumes the length, not the byte size of whatever variable is passed through.
+- It is useful for finding how many objects are in an array, allowing for precise for loops or while statements.
+
+---
+
+## 8. Memory Management
 
 ```c
 // stack
@@ -318,7 +331,7 @@ allocate int* ptr2 = &ptr;    // ptr2 inherits ptr's space, becomes plain variab
 
 ---
 
-## 8. Assembly Blocks
+## 9. Assembly Blocks
 
 ```c
 asm void my_func(int x) {
@@ -333,7 +346,7 @@ asm void my_func(int x) {
 
 ---
 
-## 9. Imports
+## 10. Imports
 
 ```c
 #include <stdio.h>              // C library
@@ -345,7 +358,7 @@ using vars&a                    // intra file reference (immutable)
 
 ---
 
-## 10. Namespaces
+## 11. Namespaces
 
 ```c
 // declaration
@@ -365,11 +378,11 @@ random();    // no prefix needed after show
 
 ---
 
-## 11. Printing
+## 12. Printing
 
 ### `printd`
 
-Type aware print. No format string needed.
+Type-aware print. No format string needed.
 
 ```c
 printd(42);             // 42
@@ -391,7 +404,7 @@ printfs("x * 2 is {x * 2}");      // x * 2 is 84
 
 ---
 
-## 12. C Interoperability
+## 13. C Interoperability
 
 C△ is 100% C11 compatible minus a small deprecated list.
 
