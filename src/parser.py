@@ -340,6 +340,34 @@ class Parser:
             cond = self.parse_expression()
             self.expect("RPAREN")
             return While(cond, self.parse_statement())
+        
+        if t[0] == "FOR":
+            self.advance()
+            self.expect('LPAREN')
+            init = None
+            if self.peek()[0] != 'SEMICOLON':
+                # could be declaration or expression
+                if self.peek()[0] in ('INT','CHAR','VOID','FLOAT','DOUBLE','LONG','SHORT','SIGNED','UNSIGNED','STRUCT','UNION','ENUM','BOOLEAN'):
+                    # local declaration
+                    typ = self.advance()[1]
+                    idtok = self.expect('IDENTIFIER')
+                    name = idtok[1]
+                    init = Declaration(var_type=typ, name=name, initializer=None)
+                    if self.accept('ASSIGN'):
+                        init.initializer = self.parse_expression()
+                else:
+                    init = self.parse_expression()
+            self.expect('SEMICOLON')
+            cond = None
+            if self.peek()[0] != 'SEMICOLON':
+                cond = self.parse_expression()
+            self.expect('SEMICOLON')
+            post = None
+            if self.peek()[0] != 'RPAREN':
+                post = self.parse_expression()
+            self.expect('RPAREN')
+            body = self.parse_statement()
+            return For(init=init, cond=cond, post=post, body=body)
 
         if t[0] == "RETURN":
             self.advance()
