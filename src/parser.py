@@ -191,8 +191,14 @@ class Parser:
     # -------------------------
 
     def peek(self):
-        """Return current token without consuming it."""
-        return self.tokens[self.i]
+        """Return current token without consuming it.
+
+        Returns an ('EOF', '') sentinel when the token stream is exhausted
+        so callers never receive an IndexError.
+        """
+        if self.i < len(self.tokens):
+            return self.tokens[self.i]
+        return ("EOF", "")
 
     def advance(self):
         """Consume and return current token."""
@@ -341,6 +347,38 @@ class Parser:
             self.expect("RPAREN")
             return While(cond, self.parse_statement())
 
+        if t[0] == "FOR":
+            self.advance()
+            self.expect('LPAREN')
+            init = None
+            if self.peek()[0] != 'SEMICOLON':
+                # could be declaration or expression.
+                # BOOLEAN is intentionally excluded: it is deprecated and will
+                # be caught by the deprecated-keyword check below if used.
+                if self.peek()[0] in (
+                    'INT', 'CHAR', 'VOID', 'FLOAT', 'DOUBLE', 'LONG', 'SHORT',
+                    'SIGNED', 'UNSIGNED', 'STRUCT', 'UNION', 'ENUM',
+                ):
+                    typ = self.advance()[1]
+                    idtok = self.expect('IDENTIFIER')
+                    name = idtok[1]
+                    init = Declaration(var_type=typ, name=name, initializer=None)
+                    if self.accept('ASSIGN'):
+                        init.initializer = self.parse_expression()
+                else:
+                    init = self.parse_expression()
+            self.expect('SEMICOLON')
+            cond = None
+            if self.peek()[0] != 'SEMICOLON':
+                cond = self.parse_expression()
+            self.expect('SEMICOLON')
+            post = None
+            if self.peek()[0] != 'RPAREN':
+                post = self.parse_expression()
+            self.expect('RPAREN')
+            body = self.parse_statement()
+            return For(init=init, cond=cond, post=post, body=body)
+
         if t[0] == "RETURN":
             self.advance()
             expr = self.parse_expression() if self.peek()[0] != "SEMICOLON" else None
@@ -388,10 +426,21 @@ class Parser:
         return ExprStmt(expr)
 
     def parse_compound(self) -> Compound:
-        """Parse a block scope."""
+        """Parse a block scope.
+
+        Raises a clean SyntaxError if EOF is reached before the closing
+        brace, rather than propagating an IndexError from peek().
+        """
         self.expect("LBRACE")
         stmts = []
-        while self.peek()[0] != "RBRACE":
+        while True:
+            t = self.peek()
+            if t[0] == "RBRACE":
+                break
+            if t[0] == "EOF":
+                raise SyntaxError(
+                    "Unexpected end of file: unclosed '{' — missing closing '}'"
+                )
             stmts.append(self.parse_statement())
         self.expect("RBRACE")
         return Compound(stmts)
@@ -518,7 +567,7 @@ class Parser:
         tok = self.peek()
         if tok[0] == "IDENTIFIER":
             return Var(self.advance()[1])
-        if tok[0] in ("INT_LITERAL", "FLOAT_LITERAL", "STRING_LITERAL"):
+        if tok[0] in ("INT_LITERAL", "FLOAT_LITERAL", "STRING_LITERAL", "CHAR_LITERAL"):
             return Literal(self.advance()[1])
         if tok[0] == "LPAREN":
             self.advance()

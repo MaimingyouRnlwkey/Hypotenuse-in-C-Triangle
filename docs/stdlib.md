@@ -98,29 +98,6 @@ Any valid C△ expression is permitted inside `{}`. The expression is evaluated 
 
 ---
 
-## Length Function
-
-### `len()`
-
-Built-in function returning the logical length of a collection or string. Implemented as a compiler intrinsic backed by `plstd` for types that carry runtime metadata.
-
-```
-int len(string s)
-int len(dynam arr)
-int len(tuple t)
-int len(char[n] buf)     // returns n
-int len(int x)           // number of decimal digits
-```
-
-```c
-len("hello")            // 5
-len([1, 2, 3])          // 3
-len(42)                 // 2
-len(1000)               // 4
-```
-
----
-
 ## Error Handling
 
 Runtime errors produced by `plstd` are printed to stderr with a message drawn from the active error personality. Error personalities are community-contributed text files stored in the `errors/` folder of the compiler repository.
