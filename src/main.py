@@ -5,9 +5,8 @@ import parser as p
 import structure
 
 
-
 def parse_args():
-    """Parse command‑line arguments using argparse."""
+    """Parse command-line arguments using argparse."""
     parser = argparse.ArgumentParser(
         prog="hypotenuse",
         description="C triangle compiler.",
@@ -29,35 +28,82 @@ def parse_args():
     return parser.parse_args()
 
 
+def print_tokens(tokens):
+    """Pretty-print a token list, one token per line."""
+    width = max(len(t[0]) for t in tokens)
+    print("┌─ Tokens " + "─" * (width + 24) + "┐")
+    for typ, val in tokens:
+        print(f"│  {typ:<{width}}  {val!r}")
+    print("└" + "─" * (width + 26) + "┘")
+
+
+def print_objects(objects):
+    """Pretty-print the Callee/Caller graph objects grouped by scope."""
+    from structure import Callee, Caller
+
+    # Group by scope name
+    by_scope = {}
+    for obj in objects:
+        scope_name = obj.scope.name
+        by_scope.setdefault(scope_name, []).append(obj)
+
+    print("\n┌─ Scope Graph " + "─" * 40 + "┐")
+    for scope_name, nodes in by_scope.items():
+        parent = nodes[0].scope.parent
+        parent_str = f"  (parent: {parent.name})" if parent else ""
+        print(f"│")
+        print(f"│  scope: {scope_name}{parent_str}")
+        for node in nodes:
+            if isinstance(node, Callee):
+                print(f"│    Callee  {node.name!r:<20} value={node.value!r}")
+            elif isinstance(node, Caller):
+                callee_name = node.dependencies[0][0].name if node.dependencies else "?"
+                args = node.dependencies[0][1] if node.dependencies else []
+                args_str = ", ".join(repr(a) for a in args)
+                print(f"│    Caller  {node.name!r:<20} -> {callee_name}({args_str})")
+    print("│")
+    print("└" + "─" * 54 + "┘")
+
+
+def compile_file(path):
+    """Lex, parse, and structure a single source file.
+
+    Returns (tokens, objects).
+    """
+    with open(path, "r") as f:
+        content = f.read()
+
+    tokens = lexer.Lexer(content).lex()
+    tokens.append(("EOF", "EOF"))
+    ast = p.Parser(tokens).parse_program()
+    structor = structure.Structor(ast)
+    return tokens, structor.build_from_ast()
+
+
 def main():
     args = parse_args()
 
     # -------------------------------------------------
-    #  Token‑only mode (-t / --tokens)
+    #  Token-only mode (-t / --tokens)
     # -------------------------------------------------
     if args.tokens:
         if not args.files:
             print("Error: no input file provided for token printing")
             sys.exit(1)
         try:
-            with open(args.files[0], "r") as file:
-                content = file.read()
-            tokenizer = lexer.Lexer(content)
-            tokens = tokenizer.lex()
-            tokens.append(("EOF", "EOF"))
-
-            # Use Structure module to handle the token list.
-            # Use the real parser module (which now has the recursion bug fixed).
-            parser = p
-            struct = structure.Structor(tokens, parser)
-            objects = struct.build_and_sort()
-            print(tokens)
-            print("Objects (including parent scopes):", objects)
+            tokens, objects = compile_file(args.files[0])
+            print_tokens(tokens)
+            print_objects(objects)
             return objects
         except FileNotFoundError:
             print(f"Error: file not found {args.files[0]}")
             sys.exit(1)
-        sys.exit(0)
+        except SyntaxError as error:
+            print(f"Syntax error: {error}")
+            sys.exit(1)
+        except Exception as error:
+            print(f"Compilation error: {error}")
+            sys.exit(1)
 
     # -------------------------------------------------
     #  Normal compilation path (one or more files)
@@ -65,20 +111,11 @@ def main():
     if not args.files:
         print("Error: no input file provided")
         sys.exit(1)
+
     for path in args.files:
         try:
-            with open(path, "r") as file:
-                content = file.read()
-            tokenizer = lexer.Lexer(content)
-            tokens = tokenizer.lex()
-            tokens.append(("EOF", "EOF"))
-
-            # Pass the parser module for consistency.
-            parser = p
-            # Use Structure module for each file's token stream.
-            struct = structure.Structor(tokens, parser)
-            objects = struct.build_and_sort()
-            print("Objects (including parent scopes):", objects)
+            tokens, objects = compile_file(path)
+            print_objects(objects)
             return objects
         except FileNotFoundError:
             print(f"Error: file not found {path}")
@@ -90,7 +127,7 @@ def main():
             print(f"Syntax error: {error}")
             sys.exit(1)
         except Exception as error:
-            print(f"Lexing error: {error}")
+            print(f"Compilation error: {error}")
             sys.exit(1)
 
 
