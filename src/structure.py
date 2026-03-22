@@ -227,6 +227,11 @@ class Structor:
 
         Recognises an optional leading MINUS token so that '-500' is stored
         as the integer -500 rather than the string '-'.
+
+        If MINUS is present but is NOT followed by a numeric literal (e.g.
+        it precedes an identifier like '-x'), the MINUS value is returned
+        and the following token is left in the iterator for the caller to
+        process.
         """
         if not value_tokens:
             return None
@@ -241,7 +246,6 @@ class Structor:
                 is_negative = True
                 first = second
             else:
-                # Not a negative literal - fall through and store raw value
                 return _value_fn(first)
 
         val_type = _type_fn(first)
@@ -269,31 +273,27 @@ class Structor:
     def build_and_sort(self):
         """Create Callee and Caller objects from the token stream and order them.
 
-        Fix for issue #62: tracks current_scope so that symbols declared
-        inside a function body are registered in the function's own scope
-        rather than the global program scope.
+        Scope rules:
+        - program scope is the root.
+        - Each function definition pushes a new named child Scope.
+        - Each for-loop pushes a new anonymous block Scope so that init-clause
+          declarations (e.g. 'int i = 0') are scoped to the loop, not the
+          enclosing function. The scope is named 'for_<pos>' to be unique.
+        - Plain if/while bodies share the enclosing scope (no new scope pushed).
+        - Scopes are popped on the RBRACE that closes them, tracked via the
+          parallel is_block_scope stack.
         """
         program = Scope("program")
-        # Fix #62: maintain a scope stack so nested scopes work correctly.
-        # current_scope starts as the program scope and is pushed/popped as
-        # function bodies are entered and exited.
-        #
-        # NOTE: only function-definition braces push a new scope. Control-flow
-        # braces (if/while/for) intentionally share the enclosing function
-        # scope so that variables declared inside them are visible in the
-        # same function body — matching C scoping semantics at this stage.
-        # When full block-scope support is needed, introduce a scope_kind tag.
         scope_stack = [program]
-        # Track which LBRACE pushes were function-scope pushes so we only
-        # pop on the matching RBRACE.
-        is_function_scope = [False]  # parallel stack; index 0 = program (never popped)
+        # Parallel stack: True if the matching RBRACE should pop a scope.
+        # Index 0 = program level, never popped.
+        is_block_scope = [False]
 
         def current_scope():
             return scope_stack[-1]
 
         self._order = {}
 
-        # Unique key for objects that may appear in multiple scopes
         def obj_key(name, scope):
             return f"{scope.name}::{name}"
 
@@ -326,32 +326,71 @@ class Structor:
                 break
 
             typ = _type(cur)
-            val = _value(cur)
 
             # ----------------------------------------------------------
-            # Handle closing brace: only pop if this was a function scope
+            # RBRACE: pop scope only if this brace opened one
             # ----------------------------------------------------------
             if typ == "RBRACE":
                 self.advance()
-                if len(scope_stack) > 1 and is_function_scope[-1]:
+                if len(scope_stack) > 1 and is_block_scope[-1]:
                     scope_stack.pop()
-                    is_function_scope.pop()
+                    is_block_scope.pop()
+                elif len(is_block_scope) > 1:
+                    # brace that didn't open a scope — just remove tracking entry
+                    is_block_scope.pop()
                 continue
 
             # ----------------------------------------------------------
-            # Handle opening brace that is NOT part of a function def
-            # (e.g. if/while bodies): advance but do NOT push a new scope
+            # LBRACE not preceded by a function/for definition:
+            # e.g. bare if/while body. Track it but don't push a scope.
             # ----------------------------------------------------------
             if typ == "LBRACE":
                 self.advance()
-                is_function_scope.append(False)
+                is_block_scope.append(False)
+                continue
+
+            # ----------------------------------------------------------
+            # FOR loop: push a new block scope covering the init clause
+            # and the loop body. Skip the header (LPAREN...RPAREN) so the
+            # init tokens are processed normally inside the new scope.
+            # The loop body LBRACE is consumed here; its RBRACE will pop
+            # this scope via the is_block_scope stack.
+            # ----------------------------------------------------------
+            if typ == "FOR":
+                self.advance()  # consume 'for'
+                for_scope = Scope(f"for_{self.pos}", current_scope())
+                scope_stack.append(for_scope)
+                is_block_scope.append(True)
+                # Skip '('
+                if _type(self.peek()) == "LPAREN":
+                    self.advance()
+                # Now let the main loop process the init clause tokens
+                # (they will be seen as normal type-keyword or identifier
+                # statements within the new for_scope).
+                continue
+
+            # ----------------------------------------------------------
+            # SEMICOLON inside for-header: separates init / cond / post.
+            # Just advance; the expressions are not yet evaluated by the
+            # structurer, only declarations matter here.
+            # ----------------------------------------------------------
+            if typ == "SEMICOLON":
+                self.advance()
+                continue
+
+            # ----------------------------------------------------------
+            # RPAREN: end of for-header. The next token should be LBRACE
+            # (the loop body); consume RPAREN here and let LBRACE be
+            # handled in the next iteration (it will append False to
+            # is_block_scope since the scope was already pushed for FOR).
+            # ----------------------------------------------------------
+            if typ == "RPAREN":
+                self.advance()
                 continue
 
             # ----------------------------------------------------------
             # Type-keyword-led declarations: int x = -500;
             # Also detects function definitions: int main() { ...
-            # Fix #61: use _parse_literal_value for correct negative numbers.
-            # Fix #62: function body opens a new scope.
             # ----------------------------------------------------------
             if typ in TYPE_KEYWORDS:
                 self.advance()
@@ -363,7 +402,6 @@ class Structor:
                     # Function definition: int main() {
                     if _type(self.peek()) == "LPAREN":
                         self.advance()  # consume '('
-                        # Skip parameter list
                         depth = 1
                         while depth > 0:
                             t = self.peek()
@@ -374,20 +412,19 @@ class Structor:
                             elif _type(t) == "RPAREN":
                                 depth -= 1
                             self.advance()
-                        # Register function as a Callee in the current (parent) scope
                         func_callee = Callee(name, current_scope(), None)
                         key = obj_key(name, current_scope())
                         self.objects[key] = func_callee
                         self._order.setdefault(key, self.pos)
-                        # If followed by '{', push a new function scope
+                        # Push a new function scope; its LBRACE is consumed here
                         if _type(self.peek()) == "LBRACE":
                             self.advance()  # consume '{'
                             func_scope = Scope(name, current_scope())
                             scope_stack.append(func_scope)
-                            is_function_scope.append(True)
+                            is_block_scope.append(True)
                         continue
 
-                    # Variable declaration with initializer
+                    # Variable declaration with optional initializer
                     if self.match("ASSIGN"):
                         value_tokens = []
                         while True:
@@ -414,13 +451,11 @@ class Structor:
             # Identifier-led statements
             # ----------------------------------------------------------
             if typ == "IDENTIFIER":
-                name = val
+                name = _value(cur)
                 self.advance()
                 nxt = self.peek()
                 nxt_type = _type(nxt)
 
-                # Variable assignment: x = -500;
-                # Fix #61: use _parse_literal_value for correct negative numbers.
                 if nxt_type == "ASSIGN":
                     self.advance()  # consume '='
                     value_tokens = []
@@ -439,15 +474,12 @@ class Structor:
                         self.advance()
                     continue
 
-                # Function call: printf("hello");
                 if nxt_type == "LPAREN":
                     self.advance()  # consume '('
                     args = self.collect_args()
-                    # Resolve or lazily create the callee in the nearest scope
                     lookup_key = obj_key(name, current_scope())
                     callee_node = self.objects.get(lookup_key)
                     if callee_node is None:
-                        # Try program scope as fallback
                         program_key = obj_key(name, program)
                         callee_node = self.objects.get(program_key)
                     if callee_node is None:
