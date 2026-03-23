@@ -9,9 +9,10 @@ using <plstd> // new library imports — high-level standard utilities (project-
 
 // struct with constructors and member function
 typed struct Example(value) {
-    int self.value = value; // integer member storing the example value
-    
-    
+    init {
+      int self.value = value; // integer member storing the example value
+    }
+    end {}
     // display: prints the provided value (intended as member or param)
     void display(value) {
         printf("Value: %d\n", value);
@@ -20,20 +21,22 @@ typed struct Example(value) {
 
 typed struct inheritor&Example {
     // inheritor: demonstrates an inheriting struct (syntax is language-specific)
+    init {}
+    end {}
     string name; // member to store a name
     printd(name); // plstd print function, just like printf
 };
 
 
 
-void function_example(tuple args) {
+void function_example(tuple loop) {
     // iterate over a tuple-like collection and print each element
     for(int i = 0; i < args.size(); i++) {
-        printf("Arg %d: %k\n", i, args[i]);
+        printf("element %d: %k\n", i, loop[i]);
     }
 }
 
-void many(int count, auto tuple args*) {
+void many(int count, auto args*) {
     // variadic-style function accepting a tuple pointer and a count
     for(int i = 0; i < count; i++) {
         printf("Param %d: %k\n", i, args[i]);
@@ -65,15 +68,15 @@ int main() {
         global _start
         _start:
             ; write syscall
-            mov rax, 1              ; syscall: write
-            mov rdi, 1              ; file descriptor: stdout
-            mov rsi, msg            ; pointer to message
-            mov rdx, 14             ; message length
+            mov rax, 1             ; syscall: write
+            mov rdi, 1             ; file descriptor: stdout
+            mov rsi, msg           ; pointer to message
+            mov rdx, 14            ; message length
             syscall
 
             ; exit syscall
-            mov rax, 60             ; syscall: exit
-            xor rdi, rdi            ; status: 0
+            mov rax, 60            ; syscall: exit
+            xor rdi, rdi           ; status: 0
             syscall
     }
     
