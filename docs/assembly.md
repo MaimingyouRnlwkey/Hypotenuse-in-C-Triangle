@@ -1,7 +1,7 @@
 # ⚙️ C△ Inline Assembly
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 C△ supports **inline assembly blocks** via the `asm` keyword. Each `asm` block is compiled to a separate `.asm` file, assembled with NASM, and linked into the final binary. 🔧
