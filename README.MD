@@ -1,7 +1,7 @@
 # 👑 The Hypotenuse Compiler
 
 <p align="center">
-  <img src="assets/C-tri.png" alt="C△ Logo" width="200"/>
+  <img src="assets/C-tri.png" alt="C△ Logo"/>
 </p>
 
 ## ✨ What is C△?
