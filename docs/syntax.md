@@ -107,9 +107,7 @@ int sum(auto args*) {
 Named lambdas — always typed.
 
 ```c
-lamb int double(int x) {
-    return x * 2;
-}
+lamb double(int num) = num*2;
 
 auto result = double(5);  // result = 10
 ```
@@ -123,13 +121,14 @@ auto result = double(5);  // result = 10
 ```c
 struct Point(int x, int y) {
     init() {
-        self.x = 0;
-        self.y = 0;
+        self.x = x;
+        self.y = y;
     }
 
     int distanceTo(Point other) {
         // ...
     }
+    end {...}
 }
 ```
 
@@ -137,21 +136,27 @@ struct Point(int x, int y) {
 
 ```c
 Typed struct Animal(string name) {
+    init() {...}
     string speak() {
         return "...";
     }
+    end {...}
 }
 
 // Single inheritance
 Typed struct Dog&Animal(string name) {
+    init {...}
     string speak() {
         return "Woof!";
     }
+    end {...}
 }
 
 // Multiple inheritance 🆕
 Typed struct PoliceDog&Dog&Animal(string name, int badge) {
+    init {...}
     // conflicts resolved via parent namespace: obj.Dog.speak()
+    end {...}
 }
 ```
 
@@ -166,6 +171,9 @@ free arr;
 
 // Auto-freed at last use 🆕
 autoremove allocate int buf[512];
+
+// Custom size types
+allocate int x(200) = 100000000000;
 
 // Robbery: another pointer takes ownership 🆕
 autoremove allocate int p[10];
@@ -199,6 +207,8 @@ auto first = t[0];
 
 ```c
 asm addInts(int a, int b) {
+    syntax x86_64_linux
+    section .text
     mov rax, a
     mov rbx, b
     add rax, rbx
