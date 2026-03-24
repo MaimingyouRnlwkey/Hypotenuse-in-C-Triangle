@@ -28,7 +28,7 @@ allocate int buffer[256];
 allocate string names[10];
 ```
 
-> 💡 `allocate type name [size]` — size is optional for single values.
+> 💡 `allocate type name(size)` — size is optional for single values. It reassigns their byte size.
 
 ---
 
