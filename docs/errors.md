@@ -65,24 +65,6 @@ Raised by the **simulation pass**.
 
 ---
 
-## 🎭 Personality Messages
-
-Each error category has a pool of **randomized personality messages** contributed by the community. When an error fires, a personality message is appended to help you understand what went wrong — with a bit of character. 😄
-
-Examples:
-
-```
-❌ SyntaxError: Unexpected token at top-level: ('UNKNOWN', '@')
-   🤔 That token doesn't belong here. Did you forget a declaration?
-
-❌ SyntaxError: Expected SEMICOLON at token index 8
-   😅 You left out the semicolon again, didn't you?
-```
-
-> 🤝 Want to add your own personality message? See [contributing.md](contributing.md)!
-
----
-
 ## 🔍 Debugging Tips
 
 - Run with `-t` to see the full token stream and scope graph before errors hit 🔬
