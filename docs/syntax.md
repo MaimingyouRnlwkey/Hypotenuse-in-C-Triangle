@@ -1,7 +1,7 @@
 # ✍️ C△ Syntax Guide
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 A complete reference for C△ syntax with examples. C△ inherits C11 syntax and extends it with new constructs.
