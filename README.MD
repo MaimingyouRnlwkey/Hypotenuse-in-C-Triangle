@@ -36,4 +36,4 @@ Full language and compiler documentation lives in the [`docs/`](docs/) folder.
 
 ## 🤝 Contributing
 
-See [`contributing.md`](docs/contributing.md) to get involved!
+See [`contributing.md`](contributing.md) to get involved!
