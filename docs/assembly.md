@@ -27,6 +27,8 @@ asm functionName(params) {
 
 ```c
 asm int addInts(int a, int b) {
+    syntax x86_64_linux
+    section .text
     mov rax, a
     mov rbx, b
     add rax, rbx
