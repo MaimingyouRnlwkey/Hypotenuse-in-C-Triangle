@@ -48,7 +48,7 @@ auto s = "hello";     // inferred as string
 auto f = 3.14;        // inferred as double
 
 // Use %k format specifier for auto in printfs
-printfs("%k", x);
+printf("%k", x);
 ```
 
 > 💡 `auto` is type-aware at runtime via the simulation pass.
@@ -110,11 +110,15 @@ Constructors, member functions, **inheritance**, becomes a native type.
 
 ```c
 Typed struct Animal(string name) {
+    init {...}
     string speak() { return "..."; }
+    end {...}
 }
 
 Typed struct Dog&Animal(string name) {
+    init {...}
     string speak() { return "Woof! 🐕"; }
+    end {...}
 }
 
 Dog d = Dog("Rex");
@@ -125,36 +129,11 @@ printfs(d.speak());   // Woof! 🐕
 
 ```c
 Typed struct PoliceDog&Dog&Animal(string name, int badge) {
+    init {...}
     // Constructor order: Animal -> Dog -> PoliceDog
     // Conflict resolution: obj.Animal.speak(), obj.Dog.speak()
+    end {...}
 }
-```
-
----
-
-### `Typed` as Typedef (in `.ctri`) 🏷️
-
-```c
-Typed int Meters;   // Meters is now an alias for int
-Meters dist = 100;
-```
-
----
-
-### `Worded` — Template Keyword (`.plib` only) 🔧
-
-```c
-Worded greet = "Hello from plstd! 👋";
-```
-
-> ⚠️ `Worded` is only available in `.plib` library files. Protected keywords cannot be `Worded`.
-
----
-
-## 📏 Sized Character Arrays
-
-```c
-char[16] buffer;   // fixed 16-byte char array
 ```
 
 ---
