@@ -1,7 +1,7 @@
 # 🔑 C△ Keyword Reference
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 This document lists all keywords in C△, their purpose, and basic usage. Keywords marked 🚫 are **deprecated** from C11 and will cause a compiler error if used.
@@ -33,9 +33,7 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | Keyword | Description |
 |---|---|
 | `struct` | Plain struct (no inheritance) |
-| `Typed` | 🆕 Template / native-type struct |
-| `Worded` | 🆕 Template keyword (`.plib` only) |
-| `namespace` / `space` | 🆕 Library namespace declaration |
+| `space` | 🆕 Library namespace declaration |
 | `typedef` | C11 type alias |
 | `union` | C11 union |
 | `enum` | C11 enumeration |
@@ -75,7 +73,6 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | `using` | 🆕 Import a symbol from a library |
 | `show` | 🆕 Globalize a library or namespace |
 | `lib:` | 🆕 Explicit plstd access prefix |
-| `expose` | 🆕 Export a symbol from a `.plib` file |
 
 ---
 
