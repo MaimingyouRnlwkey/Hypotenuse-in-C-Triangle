@@ -1,136 +1,95 @@
-# C△ Standard Library/Plus Standard (`plstd`)
+# 📦 C△ Standard Library (plstd)
 
-This document describes the C△ standard library, referred to as `plstd`. It covers how to access the library, what modules it contains, and the API of every provided function.
+<p align="center">
+  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+</p>
 
----
-
-## Overview
-
-`plstd` is the C△ standard library. It is implemented entirely in C△ using `asm` blocks for syscalls and hardware primitives. It is a single flat library — not split into separately compiled modules — but its internal code is organised into logical sections.
-
-`plstd` is linked automatically whenever a symbol it defines is used. No explicit `-l` flag or `using` statement is required, though `using` is available as an optional style choice.
+**plstd** is the C△ standard library. It is implemented in C△ itself, with `asm` blocks only where syscalls or low-level primitives are needed. plstd is a **single flat library** — not modular. 📚
 
 ---
 
-## Accessing `plstd`
-
-### Explicit access via `lib:` prefix
+## 📥 Importing plstd
 
 ```c
-lib:printd("hello");
-lib:printfs("x is {x}");
+// Globalize all of plstd 🌍
+show plstd
+
+// Globalize one module
+show lib:io
+
+// Explicit access without globalizing
+lib:printd(42);
 ```
 
-### Optional explicit import
-
-```c
-using printd from <plstd>;
-lib:printd("hello");
-```
-
-### Globalize all of `plstd`
-
-```c
-show plstd;
-printd("hello");    // no prefix needed
-```
-
-### Globalize one symbol
-
-```c
-show lib:printd;
-printd("hello");
-```
-
-Once `show plstd` is written, all `plstd` symbols are available without a prefix for the remainder of the file.
+> 💡 The compiler auto-imports what you use — manual imports are optional style.
 
 ---
 
-## Output Functions
+## 🖨️ Output Functions
 
-### `printd`
+### `printd(value)` — Type-aware Print
 
-Type-aware print. Accepts any C△ type and prints a human-readable representation followed by a newline. No format string is required.
-
-```
-void printd(auto value)
-```
-
-| Argument type | Output |
-|---|---|
-| `int`, `short`, `long` | Decimal integer |
-| `float`, `double` | Decimal float |
-| `char` | Single character |
-| `string` | String contents |
-| `dynam` | `[element, element, …]` |
-| `tuple` | `(element, element, …)` |
-| `auto` | Resolved at runtime via type tag |
-
-**Examples:**
+Prints any value, auto-detecting its type. 🔮
 
 ```c
-printd(42);                 // 42
-printd(3.14);               // 3.14
-printd("hello");            // hello
-printd([1, 2, 3]);          // [1, 2, 3]
-printd((1, "a", 2.0));      // (1, a, 2.0)
+printd(42);           // prints: 42
+printd("hello");      // prints: hello
+printd(3.14);         // prints: 3.14
+printd('A');          // prints: A
 ```
 
 ---
 
-### `printfs`
+### `printfs(format, ...)` — Formatted / f-string Print
 
-F-string print. Expressions inside `{}` are evaluated at the call site and interpolated into the output string. A newline is appended.
-
-```
-void printfs(string template)
-```
+Supports `{expr}` f-string interpolation and `%`-style format specifiers. 🎨
 
 ```c
 string name = "world";
 int x = 42;
-printfs("Hello {name}!");          // Hello world!
-printfs("x squared is {x * x}");   // x squared is 1764
-printfs("type: {auto_var}");        // type: <runtime resolved>
+
+printfs("Hello, {name}!\n");       // Hello, world!
+printfs("x = %d\n", x);           // x = 42
+printfs("{x} squared = {x*x}\n"); // 42 squared = 1764
 ```
 
-Any valid C△ expression is permitted inside `{}`. The expression is evaluated in the scope where `printfs` is called.
+---
+
+## 📏 Utility Functions
+
+### `len(collection)` — Length
+
+Returns the length of a string, `dynam` array, or tuple. 📊
+
+```c
+string s = "hello";
+int l = len(s);   // 5
+
+dynam int nums;
+nums.push(1);
+nums.push(2);
+int n = len(nums);  // 2
+```
 
 ---
 
-## Error Handling
+## 🚨 Error Handling
 
-Runtime errors produced by `plstd` are printed to stderr with a message drawn from the active error personality. Error personalities are community-contributed text files stored in the `errors/` folder of the compiler repository.
+plstd has a built-in error handler with **randomized personality messages** for each error type — contributed by the community via the `errors/` folder. 🎭
 
-Each error type has its own personality file. When the compiler is built, the personality set is compiled in. At runtime, a random personality message is selected for each error type.
+```c
+// Compiler errors automatically include a personality message
+// e.g. "Syntax error on line 7: unexpected '}'"
+//      ❌ Oops! You left a brace hanging. Close it up!
+```
 
-**Error types include:**
-
-| Error | Trigger |
-|---|---|
-| Out-of-bounds access | `dynam` or `tuple` index ≥ `len` |
-| Null dereference | Accessing a `NULL` pointer |
-| Type mismatch | Runtime `auto` type check failure |
-| Allocation failure | `allocate` returns `NULL` |
-| Free of non-heap | `free` called on stack variable |
-
-See `errors.md` for the full error reference.
+> 🤝 Want to add your own error personality? See [contributing.md](contributing.md)!
 
 ---
 
-## Planned `plstd` Additions (LAST STAGES WHEN COMPLETE)
+## 🔗 plstd Implementation
 
-The following are planned for future development stages.
-
-| Symbol | Description |
-|---|---|
-| `readln()` | Read a line from stdin into a `string` |
-| `itoa(int)` | Convert integer to `string` |
-| `atoi(string)` | Convert `string` to integer |
-| `open(string, string)` | Open a file — wrapper around `sys_open` |
-| `close(int)` | Close a file descriptor |
-| `read(int, auto, int)` | Read from file descriptor |
-| `write(int, auto, int)` | Write to file descriptor |
-| `exit(int)` | Exit the process with a status code |
-
-All future `plstd` functions are implemented in C△ with `asm` blocks only where a syscall is required — no C code inside the standard library.
+- Written entirely in **C△** + `asm` blocks for syscalls
+- Located in `PLIBS/` system path: `/usr/lib/PLIBS/`
+- User libraries: `~/.local/lib/PLIBS/`
+- Single flat library — **not modular** by design
