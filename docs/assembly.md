@@ -13,11 +13,13 @@ C△ supports **inline assembly blocks** via the `asm` keyword. Each `asm` block
 ```c
 asm functionName(params) {
     // x86_64 Linux assembly
+    syntax x86_64_linux
 }
 ```
 
 - The **function name** is the label.
 - **Parameters** use native C△ type declarations instead of assembler directives.
+- syntax describes what syntax is being used
 - `return` replaces `ret` — implicit return defaults to `rax` on x86_64.
 - Each `asm` block becomes its **own `.asm` file**. 📄
 
