@@ -1,7 +1,7 @@
 # 🏗️ The Hypotenuse Compiler
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 The Hypotenuse Compiler transforms C△ source files into native Linux ELF x86_64 binaries through a multi-stage pipeline. 🚀
