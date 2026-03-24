@@ -1,7 +1,7 @@
 # 🧱 C△ Type System
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 C△ supports all C11 primitive types plus several new first-class types designed for modern systems programming.
