@@ -1,7 +1,7 @@
 # 👑 C△ Language Reference
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="180"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="180"/>
 </p>
 
 Welcome to the official documentation for the **C△ (C Triangle)** programming language and the **Hypotenuse Compiler**. 🔺
