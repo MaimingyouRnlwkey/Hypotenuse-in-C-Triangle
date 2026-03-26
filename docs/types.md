@@ -1,265 +1,149 @@
-# C△ Type System
+# 🧱 C△ Type System
 
-This document describes every type available in C△, their storage layout, valid operations, and how they interact with the `auto` dynamic type.
+<p align="center">
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
+</p>
+
+C△ supports all C11 primitive types plus several new first-class types designed for modern systems programming.
 
 ---
 
-## Primitive Types
-
-All C11 primitive types are available without change.
+## 🔢 Primitive Types (inherited from C11)
 
 | Type | Size | Description |
 |---|---|---|
-| `char` | 1 byte | Single character or small integer |
-| `short` | 2 bytes | Short integer |
-| `int` | 4 bytes | Standard integer |
-| `long` | 8 bytes (x86_64) | Long integer |
-| `float` | 4 bytes | Single precision floating point |
-| `double` | 8 bytes | Double precision floating point |
-| `void` | — | Absence of value, only valid as return type or pointer base |
-| `unsigned` | varies | Unsigned modifier for integer types |
-| `signed` | varies | Signed modifier for integer types |
-
-All C11 integer promotions, implicit conversions, and arithmetic rules apply to these types.
+| `int` | 4 bytes | Signed 32-bit integer |
+| `unsigned int` | 4 bytes | Unsigned 32-bit integer |
+| `short` | 2 bytes | Signed 16-bit integer |
+| `long` | 8 bytes | Signed 64-bit integer |
+| `char` | 1 byte | Single byte / ASCII character |
+| `float` | 4 bytes | Single-precision float |
+| `double` | 8 bytes | Double-precision float |
+| `void` | — | No type |
 
 ---
 
-## The `auto` Type
+## 🆕 C△ New Types
 
-`auto` is a first-class dynamic type. It is not the C11 storage-class `auto` — that keyword is deprecated and repurposed.
-
-```c
-auto x = 42;          // compile-time inference: int
-auto y = "hello";     // compile-time inference: string
-auto z = 3.14;        // compile-time inference: float
-```
-
-**At compile time:** the Structor and simulation pass infer the concrete type from the right-hand side where possible. If the concrete type is statically known, the `auto` variable is treated identically to a typed variable during code generation.
-
-**At runtime:** when the type cannot be determined statically (e.g. the value comes from a dynamic source), the variable is stored with a runtime type tag.
-
-**As a parameter type:**
+### `string` — First-class string 📝
 
 ```c
-void print_anything(auto value) {
-    printf("%k\n", value);    // %k format specifier handles any auto value
-}
-```
+string greeting = "Hello, world!";
+string name = "Hypotenuse";
 
-**As a return type:**
+// Concatenation
+string full = greeting + " " + name;
 
-```c
-auto identity(auto x) {
-    return x;
-}
-```
-
-**Multiple variable packing:**
-
-```c
-auto x, z, w = someValue;    // x, z, and w all initialized to someValue
-```
-
-**Format specifier:** `%k` is the format specifier for `auto` typed values in `printf`-style calls. It resolves to the correct format at runtime.
-
----
-
-## The `string` Type
-
-`string` is a native C△ type. It wraps a heap-allocated `char*` with an integer length and capacity.
-
-```c
-string name = "hello";
-string greeting = "world";
-```
-
-**Operations:**
-
-| Operation | Description |
-|---|---|
-| `name.append(s)` | Append another string or string literal |
-| `len(name)` | Number of characters |
-| `name[i]` | Character at index `i` — returns `char` |
-| `name.raw` | Underlying `char*` — for C library interop |
-
-**Interoperability:** passing a `string` to a C function expecting `char*` requires `.raw`:
-
-```c
-string path = "/etc/hosts";
-FILE* f = fopen(path.raw, "r");
+// f-string printing via plstd 🖨️
+printfs("{greeting}, {name}!");
 ```
 
 ---
 
-## Sized Char Arrays
-
-`char[n]` declares a fixed-size character buffer on the stack.
+### `auto` — Dynamic / Inferred Type 🔮
 
 ```c
-char[20] buffer = "Hello, World!";
-char[64] name;
+auto x = 42;          // inferred as int
+auto s = "hello";     // inferred as string
+auto f = 3.14;        // inferred as double
+
+// Use %k format specifier for auto in printfs
+printf("%k", x);
 ```
 
-This is distinct from `string`. A `char[n]` is a plain C array with a fixed compile-time size. It does not carry length or capacity metadata and cannot be resized.
+> 💡 `auto` is type-aware at runtime via the simulation pass.
 
 ---
 
-## Dynamic Arrays — `dynam`
-
-`dynam` declares a resizable array of a single type.
+### `dynam` — Dynamic Array 📊
 
 ```c
-dynam int numbers = [1, 2, 3, 4, 5];
-dynam string names = [];
+dynam int numbers;
+numbers.push(5);
+numbers.push(10);
+numbers.pop();       // removes last
+numbers.remove(0);   // removes by index
+int size = len(numbers);
 ```
 
-**Operations:**
-
-| Operation | Description |
-|---|---|
-| `.push(value)` | Append an element |
-| `.pop()` | Remove and return the last element |
-| `.remove(i)` | Remove element at index `i` |
-| `arr[i]` | Index access |
-| `len(arr)` | Current element count |
-
-`dynam` works with any type including `typed struct` types:
-
-```c
-dynam float positions = [];
-positions.push(1.0, 2.0, 3.0);
-```
+> ⚠️ `dynam` arrays grow and shrink at runtime. No fixed capacity.
 
 ---
 
-## Tuples
-
-A tuple is a fixed-on-creation, mixed-type ordered collection. Elements may have different types.
+### `tuple` — Heterogeneous List 🎒
 
 ```c
-tuple t = [1, "hello", 3.14];
-
-t[0]        // 1       (int)
-t[1]        // "hello" (string)
-t[2]        // 3.14    (float)
-len(t)      // 3
+tuple t = [1, "hello", 3.14, 'x'];
+auto first = t[0];    // 1
+auto second = t[1];   // "hello"
 ```
 
-Tuples can be returned from functions:
-
-```c
-tuple get_info() {
-    return [42, "answer"];
-}
-```
-
-Tuple element types are tracked at runtime. Assigning a tuple element to an `auto` variable preserves the runtime type.
+> 💡 Tuples are declared with `[]` and can hold mixed types.
 
 ---
 
-## Plain Structs
+## 🏗️ Struct Types
 
-A plain `struct` is a data container. It is not a native type — it cannot be used as the element type of `dynam`, as a parameter type without a pointer, or as a return type in the same way a primitive can. It supports constructors declared on the struct name line and optional member functions.
+### Plain Struct
+
+Constructors, member functions, **no inheritance**, not a native type.
 
 ```c
-struct Point(int x, int y) {
-    int self.x = x;
-    int self.y = y;
+struct Vec2(float x, float y) {
+    init() { self.x = 0.0; self.y = 0.0; }
+    end()  { /* cleanup */ }
 
-    void display() {
-        printf("Point(%d, %d)\n", self.x, self.y);
+    float length() {
+        return sqrt(x*x + y*y);
     }
 }
 
-Point p(1, 2);
-p.display();
+Vec2 v = Vec2(3.0, 4.0);
+printd(v.length());   // 5.0
 ```
 
 ---
 
-## Typed Structs
+### `Typed` Struct — Native Type + Inheritance 👑
 
-A `typed struct` is a first-class native type. Once declared, it can be used anywhere a primitive type can: as a `dynam` element, `auto` value, function parameter, or return type.
+Constructors, member functions, **inheritance**, becomes a native type.
 
 ```c
-typed struct Vec3(float x, float y, float z) {
-    float self.x = x;
-    float self.y = y;
-    float self.z = z;
-
-    float magnitude() {
-        return self.x * self.x + self.y * self.y + self.z * self.z;
-    }
+Typed struct Animal(string name) {
+    init {...}
+    string speak() { return "..."; }
+    end {...}
 }
 
-Vec3 v(1.0, 0.0, 0.0);
-dynam Vec3 path;
-auto foo(Vec3 v) { return v.magnitude(); }
+Typed struct Dog&Animal(string name) {
+    init {...}
+    string speak() { return "Woof! 🐕"; }
+    end {...}
+}
+
+Dog d = Dog("Rex");
+printfs(d.speak());   // Woof! 🐕
 ```
 
-**Inheritance** is supported only for `typed struct` via `&`:
-- Inheritance only carries over the already pre-existing variables and constructors, not the initialization of those structs.
+#### Multiple Inheritance 🔀
+
 ```c
-typed struct Dog&Animal(string name) {
-    init(string name) {
-        self.name = name;
-    }
-    end {}
-    void speak() { printf("Woof!\n"); }
+Typed struct PoliceDog&Dog&Animal(string name, int badge) {
+    init {...}
+    // Constructor order: Animal -> Dog -> PoliceDog
+    // Conflict resolution: obj.Animal.speak(), obj.Dog.speak()
+    end {...}
 }
 ```
 
-Multiple inheritance chains `&` types. Constructor order is left to right. Name conflicts are resolved via parent namespace:
-
-```c
-typed struct C&A&B { ... }
-
-C obj(...);
-obj.A.method();    // calls A's method
-obj.B.method();    // calls B's method
-```
-
 ---
 
-## Pointer Types
+## 🎯 Type Format Specifiers
 
-C pointer syntax is fully supported:
-
-```c
-int* ptr = &x;
-ptr->field;       // C pointer member access
-*ptr;             // dereference
-```
-
-Pointers to heap-allocated objects are created via `allocate`:
-
-```c
-allocate int* buf [256];    // heap, 256 ints
-free buf;                   // manual deallocation
-```
-
-See `memory.md` for `autoremove` and robbery.
-
----
-
-## Type Coercion and Compatibility
-
-- C△ inherits all C11 implicit arithmetic conversions between primitive types.
-- `string` and `char*` are not implicitly interchangeable — use `.raw` to extract the underlying `char*`.
-- `auto` accepts any value. Passing a concrete type to an `auto` parameter is always valid.
-- A `typed struct` can be passed to an `auto` parameter; the runtime type tag records its concrete type.
-- `dynam` and `tuple` cannot be implicitly cast to each other.
-
----
-
-## `len()`
-
-`len()` is a compiler built-in that returns the logical length of any collection or string.
-
-| Argument | Return value |
+| Specifier | Type |
 |---|---|
-| `string` | Number of characters |
-| `dynam` | Number of elements |
-| `tuple` | Number of elements |
-| `char[n]` | Declared size `n` |
-| integer | Number of decimal digits |
+| `%d` | `int` |
+| `%f` | `float` / `double` |
+| `%s` | `string` / `char*` |
+| `%c` | `char` |
+| `%k` | `auto` (type-aware) 🆕 |

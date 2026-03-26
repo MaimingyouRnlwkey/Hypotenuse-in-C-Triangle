@@ -1,10 +1,39 @@
-# Soon To Come.
-## Hypotenuse Compiler
+# 👑 The Hypotenuse Compiler
 
-Hypotenuse is a C triangle compiler, and C triangle is a new language soon to be developed by us.
-This is in spite of C being Featureless and C++ being too hard to learn. A middle ground had to be born!
+<p align="center">
+  <img src="assets/logo.png" alt="C△ Logo"/>
+</p>
 
+## ✨ What is C△?
 
-## Install Guide
- - Make sure you have linux and python.
- - clone repo and cd into it, then make.
+Hypotenuse is the compiler for **C△ (C Triangle)** — a new systems programming language born out of frustration with C's featurelessness and C++'s overwhelming complexity. A middle ground had to be born! 🔺
+
+C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, modern, and designed to be learnable.
+
+> *The future of C and the end of C++* 👑
+
+---
+
+## 🚀 Install Guide
+
+1. 🐧 Make sure you have **Linux** and **Python 3**
+2. 📦 Clone the repo and `cd` into it
+3. 🔨 Run `make`
+
+```bash
+git clone https://github.com/setuser1/The-Hypotenuse-Compiler
+cd The-Hypotenuse-Compiler
+make
+```
+
+---
+
+## 📚 Documentation
+
+Full language and compiler documentation lives in the [`docs/`](docs/) folder.
+
+---
+
+## 🤝 Contributing
+
+See [`contributing.md`](contributing.md) to get involved!
