@@ -1,17 +1,17 @@
-# 📦 C△ Standard Library (plstd)
+# C△ Standard Library (plstd)
 
 <p align="center">
-  <img src="../assets/logo.jpg" alt="C△ Logo" width="120"/>
+  <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
 **plstd** is the C△ standard library. It is implemented in C△ itself, with `asm` blocks only where syscalls or low-level primitives are needed.
 
 ---
 
-## 📥 Importing plstd
+## Importing plstd
 
 ```c
-// Globalize all of plstd 🌍
+// Globalize all of plstd
 show plstd
 
 // Globalize one module
@@ -21,15 +21,15 @@ show lib:io
 lib:printd(42);
 ```
 
-> 💡 The compiler auto-imports what you use — manual imports are optional style.
+> The compiler auto-imports what you use — manual imports are optional style.
 
 ---
 
-## 🖨️ Output Functions
+## Output Functions
 
 ### `printd(value)` — Type-aware Print
 
-Prints any value, auto-detecting its type. 🔮
+Prints any value, auto-detecting its type.
 
 ```c
 printd(42);           // prints: 42
@@ -42,7 +42,7 @@ printd('A');          // prints: A
 
 ### `printfs(format, ...)` — Formatted / f-string Print
 
-Supports `{expr}` f-string interpolation and `%`-style format specifiers. 🎨
+Supports `{expr}` f-string interpolation and `%`-style format specifiers.
 
 ```c
 string name = "world";
@@ -55,7 +55,7 @@ printfs("{x} squared = {x*x}\n"); // 42 squared = 1764
 
 ---
 
-## 🔗 plstd Implementation
+## plstd Implementation
 
 - Written entirely in base **C△** + `asm` blocks for syscalls
 - Located in `PLIBS/` system path: `/usr/lib/PLIBS/`
