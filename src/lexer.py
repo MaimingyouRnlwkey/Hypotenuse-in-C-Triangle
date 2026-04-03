@@ -7,7 +7,7 @@ Tokens = [
     ("COMMENT_MULTI", re.compile(r"/\*.*?\*/", re.DOTALL)),
     ("COMMENT_LINE", re.compile(r"//[^\n]*")),
     # PREPROCESSOR DIRECTIVES (e.g. #include, #define, #if, #endif, etc.)
-    ("PREPROCESSOR", re.compile(r"\#[^\n]*")),
+    ("PREPROCESSOR", re.compile(r"#[^\n]*")),
     # KEYWORDS
     ("IF", re.compile(r"\bif\b")),
     ("ELSE", re.compile(r"\belse\b")),
@@ -158,7 +158,7 @@ class Lexer:
                     break
             self.pos += 1
         value = self.text[start : self.pos].strip()
-        return ("EXPR", value)
+        return "EXPR", value
 
     def lex(self):
         """Convenience wrapper that returns a list of (type, lexeme) tokens for *text*."""
