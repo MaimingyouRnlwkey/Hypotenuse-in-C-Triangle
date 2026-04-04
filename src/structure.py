@@ -77,19 +77,25 @@ class Callee(Node):
     def __init__(self, name, scope, value, var_type=None, is_library=False):
         super().__init__(name, scope)
         self.value = value
-        self.var_type = var_type  # Store variable type for pointers
+        self.var_type = var_type
         self.is_library = is_library
         self.return_type = None
         self.has_return = False
         self.return_expression = None
+        # True when this Callee was registered via a Declaration node
+        # (i.e. it is a variable, not a function).
+        self.is_variable = False
 
     def __repr__(self):
         val_repr = repr(self.value)
-        # Determine kind based on type (for pointers) or value
         if self.var_type and "*" in self.var_type:
-            kind = f"{self.var_type}"
+            kind = self.var_type
         elif self.is_library:
             kind = "library"
+        elif self.is_variable:
+            kind, _ = callee_value_display_parts(self.value)
+        elif self.value is None and not self.is_library:
+            kind = "function"
         else:
             kind, _ = callee_value_display_parts(self.value)
         type_info = f", type={self.var_type!r}" if self.var_type else ""
@@ -183,14 +189,14 @@ class Lib:
 
 
 # ============================================================
-# Callee value display (issue #83)
+# Callee value display
 # ============================================================
 
 
 def callee_value_display_parts(value):
     """Return (kind_label, repr_string) for a Callee.value."""
     if value is None:
-        return "library", "None"
+        return "none", "None"
     if callable(value):
         return "function", repr(value)
     if type(value) is bool:
@@ -201,6 +207,8 @@ def callee_value_display_parts(value):
         return "float", repr(value)
     if isinstance(value, Node):
         return "graph_node", f"<Node {type(value).__name__}>"
+    if isinstance(value, str):
+        return "string", repr(value)
     return "other", repr(value)
 
 
@@ -215,7 +223,7 @@ def _is_int_const(x):
 
 
 def _c_int_div(a: int, b: int) -> int:
-    """C integer division: truncates toward zero (C99), not Python floor division."""
+    """C integer division: truncates toward zero (C99)."""
     c = abs(a) // abs(b)
     if (a < 0) ^ (b < 0):
         c = -c
@@ -223,18 +231,25 @@ def _c_int_div(a: int, b: int) -> int:
 
 
 def _c_int_mod(a: int, b: int) -> int:
-    """C integer remainder: a - (a/b)*b using truncation division (C99)."""
+    """C integer remainder using C99 truncation division."""
     return a - _c_int_div(a, b) * b
 
 
 def _numeric_binary(op, left, right):
-    """Apply a binary op to two numeric constants; None if unsupported or invalid.
+    """Apply a binary op to two numeric (or boolean) constants.
 
-    Integer ``/`` and ``%`` follow C99 truncation-toward-zero rules, not Python's
-    ``//`` (floor) or ``%`` (divisor-sign remainder).
+    Returns None if the operation is unsupported or would be invalid
+    (e.g. division by zero).
+
+    Arithmetic: + - * / % **  (/ and % use C99 truncation rules)
+    Comparison: == != < > <= >=
+    Logical:    && ||  (short-circuit semantics, returns Python bool)
     """
+    # Guard against division/modulo by zero
     if right == 0 and op in ("/", "%"):
         return None
+
+    # Arithmetic
     if op == "+":
         return left + right
     if op == "-":
@@ -246,11 +261,32 @@ def _numeric_binary(op, left, right):
             return _c_int_div(left, right)
         return left / right
     if op == "**":
-        return left**right
+        return left ** right
     if op == "%":
         if _is_int_const(left) and _is_int_const(right):
             return _c_int_mod(left, right)
         return left % right
+
+    # Comparison  (return int 1/0 to match C semantics)
+    if op == "==":
+        return int(left == right)
+    if op == "!=":
+        return int(left != right)
+    if op == "<":
+        return int(left < right)
+    if op == ">":
+        return int(left > right)
+    if op == "<=":
+        return int(left <= right)
+    if op == ">=":
+        return int(left >= right)
+
+    # Logical  (return int 1/0)
+    if op == "&&":
+        return int(bool(left) and bool(right))
+    if op == "||":
+        return int(bool(left) or bool(right))
+
     return None
 
 
@@ -258,36 +294,36 @@ def _extract_literal(expr, scope=None):
     """Return a Python value from a simple AST expression, or None.
 
     Handles:
-    - Literal nodes          -> the literal value cast to int/float where possible
-    - Unary('-', Literal)    -> negative numeric literal (fix for issue #61)
-    - Unary('+', Literal)    -> unary plus on a constant
-    - Unary('&' / '*', ...)  -> no constant value (issue #87 groundwork)
-    - Binary on constants    -> folded + - * / ** % (issue #43)
-    - Var (with scope lookup) -> stored value if available and constant
-    - Anything else          -> None (non-constant expression)
+    - Literal nodes
+    - Var nodes (with scope lookup)
+    - Unary(-/+/!) on a constant
+    - Binary on two constants (arithmetic, comparison, logical)
+    - Anything else -> None
     """
     if isinstance(expr, Literal):
         return _cast_literal(expr.value)
+
     if isinstance(expr, Var) and scope is not None:
         for store in (scope.children, scope.callees, scope.callers):
             if expr.name in store:
                 callee = store[expr.name]
-                if callee.has_constant_value():
+                if hasattr(callee, "has_constant_value") and callee.has_constant_value():
                     return callee.value
         if scope.parent:
             return _extract_literal(expr, scope.parent)
         return None
+
     if isinstance(expr, Unary) and expr.prefix:
-        if expr.op == "-":
-            inner = _extract_literal(expr.operand, scope)
-            if isinstance(inner, (int, float)):
-                return -inner
-        elif expr.op == "+":
-            inner = _extract_literal(expr.operand, scope)
-            if isinstance(inner, (int, float)):
-                return inner
-        elif expr.op in ("&", "*"):
+        inner = _extract_literal(expr.operand, scope)
+        if expr.op == "-" and isinstance(inner, (int, float)):
+            return -inner
+        if expr.op == "+" and isinstance(inner, (int, float)):
+            return inner
+        if expr.op == "!" and inner is not None:
+            return int(not inner)  # C semantics: returns 0 or 1
+        if expr.op in ("&", "*"):
             return None
+
     if isinstance(expr, Binary):
         left = _extract_literal(expr.left, scope)
         right = _extract_literal(expr.right, scope)
@@ -296,6 +332,7 @@ def _extract_literal(expr, scope=None):
         if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
             return None
         return _numeric_binary(expr.op, left, right)
+
     return None
 
 
@@ -329,13 +366,12 @@ class Structor:
         structor = Structor(ast)
         objects = structor.build_from_ast()
 
-    Scope rules (matching C scoping semantics):
-    - ``Program``    -> root ``program`` scope
-    - ``Function``   -> named child scope pushed for the function body
-    - ``For``        -> anonymous ``for_<name>`` child scope covering the
-                        init declaration *and* the loop body (fix for issue
-                        where ``int i`` leaked into the enclosing scope)
-    - ``Compound`` / ``If`` / ``While`` bodies share the enclosing scope
+    Scope rules:
+    - ``Program``  -> root ``program`` scope
+    - ``Function`` -> named child scope for the function body
+    - ``For``      -> anonymous ``for_<n>`` child scope (init declaration
+                      is scoped to the loop, not the enclosing function)
+    - ``Compound`` / ``If`` / ``While`` share the enclosing scope
     """
 
     def __init__(self, ast: Program):
@@ -389,12 +425,11 @@ class Structor:
             if getattr(node, "else", None):
                 self._collect_user_funcs(getattr(node, "else"))
         elif hasattr(node, "init"):
-            self._collect_user_funcs(node.init)
-            if node.cond:
+            if node.init:
+                self._collect_user_funcs(node.init)
+            if getattr(node, "cond", None):
                 self._collect_user_funcs(node.cond)
-            if node.incr:
-                self._collect_user_funcs(node.incr)
-            if node.body:
+            if getattr(node, "body", None):
                 self._collect_user_funcs(node.body)
 
     # ------------------------------------------------------------------
@@ -436,13 +471,12 @@ class Structor:
             node, (Assignment, Binary, Unary, Call, ArrayAccess, Var, Literal)
         ):
             self._walk_expr(node, scope)
-        # Other node types (Break, Continue, etc.) have no graph impact yet
 
     def _walk_function(self, node: Function, parent_scope: Scope):
-        """Register function as a Callee in the parent scope, then walk its
-        body in a new child scope named after the function."""
         self._user_funcs.add(node.name)
         callee = Callee(node.name, parent_scope, None)
+        # Functions are not variables
+        callee.is_variable = False
         self._register(callee, parent_scope)
         func_scope = Scope(node.name, parent_scope)
         self._func_callee_stack.append(callee)
@@ -459,15 +493,13 @@ class Structor:
             else None
         )
         callee = Callee(node.name, scope, value, var_type=node.var_type)
+        # Mark as variable so print_objects/repr display the right kind
+        callee.is_variable = True
         self._register(callee, scope)
-        # Also walk initializer for any embedded calls
         if node.initializer is not None:
             self._walk_expr(node.initializer, scope)
 
     def _walk_for(self, node: For, parent_scope: Scope):
-        """Push a new scope for the for-loop so that the init declaration
-        (e.g. 'int i = 0') is scoped to the loop, not the enclosing function.
-        The loop body shares the same for-scope."""
         for_scope = Scope(f"for_{self._next_id()}", parent_scope)
         if node.init is not None:
             self._walk_node(node.init, for_scope)
@@ -478,8 +510,6 @@ class Structor:
         self._walk_node(node.body, for_scope)
 
     def _walk_compound(self, node: Compound, scope: Scope):
-        """Walk all statements in a block. Does NOT push a new scope —
-        the caller is responsible for creating the appropriate scope."""
         for stmt in node.stmts:
             self._walk_node(stmt, scope)
 
@@ -494,80 +524,82 @@ class Structor:
         self._walk_node(node.body, scope)
 
     def _walk_expr(self, node, scope: Scope):
-        """Walk an expression node, registering any Call nodes as Callers."""
+        """Walk an expression, registering Call nodes as Callers.
+
+        Returns the constant-folded value when it can be determined,
+        or None otherwise.
+        """
         if isinstance(node, Call):
             self._walk_call(node, scope)
-        elif isinstance(node, Assignment):
+            return None
+        if isinstance(node, Assignment):
             self._walk_expr(node.target, scope)
             self._walk_expr(node.value, scope)
-        elif isinstance(node, Binary):
+            return None
+        if isinstance(node, Binary):
             left_val = _extract_literal(node.left, scope)
             right_val = _extract_literal(node.right, scope)
+            # Always recurse so nested calls are still registered
+            self._walk_expr(node.left, scope)
+            self._walk_expr(node.right, scope)
             if left_val is not None and right_val is not None:
-                if isinstance(left_val, (int, float)) and isinstance(
-                    right_val, (int, float)
-                ):
+                if isinstance(left_val, (int, float)) and isinstance(right_val, (int, float)):
                     return _numeric_binary(node.op, left_val, right_val)
             return None
-        elif isinstance(node, Unary):
+        if isinstance(node, Unary):
             operand_val = self._walk_expr(node.operand, scope)
             if operand_val is not None:
-                if node.op == "-":
-                    if isinstance(operand_val, (int, float)):
-                        return -operand_val
-                elif node.op == "+":
-                    if isinstance(operand_val, (int, float)):
-                        return operand_val
+                if node.op == "-" and isinstance(operand_val, (int, float)):
+                    return -operand_val
+                if node.op == "+" and isinstance(operand_val, (int, float)):
+                    return operand_val
+                if node.op == "!":
+                    return int(not operand_val)
             return None
-        elif isinstance(node, ArrayAccess):
+        if isinstance(node, ArrayAccess):
             self._walk_expr(node.array, scope)
             self._walk_expr(node.index, scope)
-        # Var and Literal have no sub-expressions to walk
+            return None
+        # Var and Literal: return their constant value if known
+        if isinstance(node, Literal):
+            return _cast_literal(node.value)
+        if isinstance(node, Var):
+            return _extract_literal(node, scope)
+        return None
 
     def _walk_call(self, node: Call, scope: Scope):
         """Register a function call as a Caller node linked to its Callee."""
-        # Resolve callee name
         if isinstance(node.callee, Var):
             callee_name = node.callee.name
         else:
-            # Complex callee expression (e.g. function pointer) — walk it and skip
             self._walk_expr(node.callee, scope)
             for arg in node.args:
                 self._walk_expr(arg, scope)
             return
 
-        # Look up or lazily create the Callee node
         callee_key = self._obj_key(callee_name, scope)
         callee_node = self.objects.get(callee_key)
         if callee_node is None:
-            # Search up the scope chain
             found = scope.called(callee_name)
             if found is not None and isinstance(found, Callee):
                 callee_node = found
             else:
-                # Forward declaration / extern — register lazily in current scope
                 is_library = callee_name not in self._user_funcs
                 callee_node = Callee(callee_name, scope, None, is_library=is_library)
                 self._register(callee_node, scope)
 
-        # Build arg list (raw AST nodes for now)
         args = list(node.args)
-
         caller_name = f"call_{callee_name}_{self._next_id()}"
         caller = Caller(caller_name, scope)
         caller.call(callee_node, *args)
-
-        # Link caller to callee and set arguments
         caller.assign_callee(callee_node)
         caller.set_arguments(args)
 
-        # Propagate callee's computed value if available
         if callee_node.has_constant_value():
             caller.propagate_value(callee_node.value)
 
         self._register(caller, scope)
 
-        # Walk args for nested calls
         for arg in node.args:
             self._walk_expr(arg, scope)
 
@@ -576,7 +608,6 @@ class Structor:
     # ------------------------------------------------------------------
 
     def _link_callee_children(self):
-        """Link each Caller to its callee's child scope for downstream use."""
         for obj in self.objects.values():
             if isinstance(obj, Caller) and obj.dependencies:
                 callee_node = obj.dependencies[0][0]
@@ -587,56 +618,12 @@ class Structor:
                 }
 
     def _propagate_all_values(self):
-        """Propagate computed values from callees to callers.
-
-        Evaluates each callee's return_expression AST and propagates the
-        result to all callers. Handles recursive calls by tracking visited
-        callees to avoid infinite loops.
-        """
-        visited = set()
-
-        def eval_return_expr(callee, visited_stack=None):
-            if visited_stack is None:
-                visited_stack = []
-
-            if callee.name in visited:
-                return None
-            if callee in visited_stack:
-                return None
-
-            visited_stack = list(visited_stack)
-            visited_stack.append(callee)
-
-            return_expr = callee.get_return_expression()
-            if return_expr is None:
-                return None
-
-            scope = callee.scope
-            result = self._walk_expr(return_expr, scope)
-
-            if result is not None:
-                return result
-
-            for obj in self.objects.values():
-                if isinstance(obj, Caller):
-                    dep = obj.dependencies[0] if obj.dependencies else (None, [])
-                    if dep[0] is callee:
-                        if obj.value is not None:
-                            return obj.value
-
-            return None
-
+        """Propagate constant values from callees to callers where possible."""
         for obj in self.objects.values():
             if isinstance(obj, Caller) and obj._callee_ref is not None:
                 callee = obj._callee_ref
                 if callee.has_constant_value():
                     obj.propagated_value = callee.value
-                elif callee.get_return_expression() is not None:
-                    result = eval_return_expr(callee)
-                    if result is not None:
-                        obj.propagated_value = result
-
-        visited.clear()
 
 
 # ============================================================
