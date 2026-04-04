@@ -23,15 +23,15 @@ Thank you for your interest in contributing! 🎉 Whether you're fixing bugs, ad
 
 ## 🌿 Branch Naming
 
-| Prefix | Purpose |
-|---|---|
-| `fix/` | Bug fixes 🐛 |
-| `feat/` | New features ✨ |
-| `refactor/` | Code restructuring 🔧 |
-| `docs/` | Documentation updates 📝 |
-| `assets/` | Images, logos, media 🖼️ |
-| `test/` | Tests and test infrastructure 🧪 |
-| `patch/` | Hotfixes and patches 🩹 |
+| Prefix      | Purpose                          |
+| ----------- | -------------------------------- |
+| `fix/`      | Bug fixes 🐛                     |
+| `feat/`     | New features ✨                  |
+| `refactor/` | Code restructuring 🔧            |
+| `docs/`     | Documentation updates 📝         |
+| `assets/`   | Images, logos, media 🖼️          |
+| `test/`     | Tests and test infrastructure 🧪 |
+| `patch/`    | Hotfixes and patches 🩹          |
 
 ---
 

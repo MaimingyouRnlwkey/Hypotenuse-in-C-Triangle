@@ -10,12 +10,35 @@ A complete reference for C△ syntax with examples. C△ inherits C11 syntax and
 
 ## File Extensions
 
-| Extension | Purpose |
-|---|---|
-| `.ctri` | C△ source file |
-| `.plib` | C△ library file |
+| Extension | Purpose         |
+| --------- | --------------- |
+| `.ctri`   | C△ source file  |
+| `.plib`   | C△ library file |
 
 The compiler detects whether a file is an **executable** (has a `main` function) or a **library** (`.plib` extension).
+
+> Library files (`.plib`) are written in C△ using the same features as regular code: `dynam` arrays, `typed struct` inheritance, custom types, etc. Unlike C/C++ headers, there's no separate header syntax, preprocessor, or implementation file — a `.plib` file is complete and self-contained.
+
+---
+
+## Base Functions
+
+These functions are built into the language itself, not part of plstd.
+
+### `len(collection)` — Length
+
+Returns the length of strings, `dynam` arrays, and `tuple` collections.
+
+```c
+string s = "hello";
+int l = len(s);        // l = 5
+
+dynam int arr = [1, 2, 3];
+int n = len(arr);      // n = 3
+
+tuple t = [1, "hi", 3.14];
+int t_len = len(t);    // t_len = 3
+```
 
 ---
 
@@ -106,7 +129,7 @@ int sum(auto args*) {
 
 ---
 
-## Lambdas (`lamb`) *NEW*
+## Lambdas (`lamb`) _NEW_
 
 Named lambdas — return type is optional.
 
@@ -125,7 +148,7 @@ auto result = double(5);  // result = 10
 
 ```c
 struct Point(int x, int y) {
-    init() {
+    init {
         self.x = x;
         self.y = y;
     }
@@ -137,11 +160,11 @@ struct Point(int x, int y) {
 }
 ```
 
-### Typed Struct (Native Type + Inheritance) *NEW*
+### Typed Struct (Native Type + Inheritance) _NEW_
 
 ```c
 typed struct Animal(string name) {
-    init() {...}
+    init {...}
     string speak() {
         return "...";
     }
@@ -187,27 +210,31 @@ int* q = &p;   // q becomes a plain variable, p drops
 
 ---
 
-## Dynamic Arrays (`dynam`) *NEW*
+## Dynamic Arrays (`dynam`) _NEW_
 
 ```c
 dynam int numbers = [1, 2, 3, 4, 5];
 numbers.push(6);
 numbers.remove(0);
-int len = len(numbers);
+int count = len(numbers);
 ```
+
+> `len()` is a base function — built into the language.
 
 ---
 
-## Tuples *NEW*
+## Tuples _NEW_
 
 ```c
 tuple t = [1, "hello", 3.14];
-auto first = t[0];
+int count = len(t);   // count = 3
 ```
+
+> `len()` is a base function — built into the language.
 
 ---
 
-## Inline Assembly (`asm`) *NEW*
+## Inline Assembly (`asm`) _NEW_
 
 ```c
 asm addInts(int a, int b) {

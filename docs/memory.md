@@ -10,32 +10,35 @@ C△ gives you full control over memory while adding safer, more expressive tool
 
 ## Stack vs Heap
 
-| Location | How | Notes |
-|---|---|---|
-| Stack | Normal variable declaration | Freed automatically on scope exit |
-| Heap | `allocate` keyword | Must be freed manually or via `autoremove` |
+| Location | How                         | Notes                                      |
+| -------- | --------------------------- | ------------------------------------------ |
+| Stack    | Normal variable declaration | Freed automatically on scope exit          |
+| Heap     | `allocate` keyword          | Must be freed manually or via `autoremove` |
 
 ---
 
 ## `allocate` — Heap Allocation
 
 ```c
-// Allocate a single value
-allocate int counter;
-
 // Allocate an array of N elements
 allocate int buffer[256];
 allocate string names[10];
+
+// Allocate ONE variable with custom byte size
+allocate int x(64);  // allocates a single int with 64 bytes
 ```
 
-> `allocate type name(size)` — size is optional for single values. It reassigns their byte size.
+| Syntax | Meaning |
+| ------ | ------- |
+| `allocate int buf[64]` | Array of 64 `int` elements |
+| `allocate int x(64)` | Single variable with 64-byte size |
 
 ---
 
 ## `free` — Manual Deallocation
 
 ```c
-allocate int x;
+allocate int x(8);  // 8 bytes
 x = 42;
 free x;   // manually release
 ```
