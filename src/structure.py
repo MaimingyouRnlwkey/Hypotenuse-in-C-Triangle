@@ -79,6 +79,9 @@ class Callee(Node):
         self.value = value
         self.var_type = var_type  # Store variable type for pointers
         self.is_library = is_library
+        self.return_type = None
+        self.has_return = False
+        self.return_expression = None
 
     def __repr__(self):
         val_repr = repr(self.value)
@@ -103,6 +106,19 @@ class Callee(Node):
             return self.value.eval()
         return self.value
 
+    def add_return_expression(self, node):
+        self.return_expression = node
+        self.has_return = True
+
+    def get_return_expression(self):
+        return self.return_expression
+
+    def set_computed_value(self, val):
+        self.value = val
+
+    def has_constant_value(self):
+        return not callable(self.value) and not isinstance(self.value, Node)
+
 
 class Caller(Node):
     """A node that depends on and calls other nodes."""
@@ -110,7 +126,10 @@ class Caller(Node):
     def __init__(self, name, scope, value=None):
         super().__init__(name, scope)
         self.value = value
+        self.propagated_value = None
         self.callee_children: dict | None = None
+        self._callee_ref = None
+        self._args = []
 
     def __repr__(self):
         if not self.dependencies:
@@ -124,6 +143,15 @@ class Caller(Node):
 
     def call(self, node, *args):
         self.dependencies.append((node, args))
+
+    def assign_callee(self, callee_node):
+        self._callee_ref = callee_node
+
+    def set_arguments(self, args):
+        self._args = args
+
+    def propagate_value(self, value):
+        self.value = value
 
     def eval(self):
         result = self.value if isinstance(self.value, (int, float)) else 0
@@ -226,7 +254,7 @@ def _numeric_binary(op, left, right):
     return None
 
 
-def _extract_literal(expr):
+def _extract_literal(expr, scope=None):
     """Return a Python value from a simple AST expression, or None.
 
     Handles:
@@ -235,24 +263,34 @@ def _extract_literal(expr):
     - Unary('+', Literal)    -> unary plus on a constant
     - Unary('&' / '*', ...)  -> no constant value (issue #87 groundwork)
     - Binary on constants    -> folded + - * / ** % (issue #43)
+    - Var (with scope lookup) -> stored value if available and constant
     - Anything else          -> None (non-constant expression)
     """
     if isinstance(expr, Literal):
         return _cast_literal(expr.value)
+    if isinstance(expr, Var) and scope is not None:
+        for store in (scope.children, scope.callees, scope.callers):
+            if expr.name in store:
+                callee = store[expr.name]
+                if callee.has_constant_value():
+                    return callee.value
+        if scope.parent:
+            return _extract_literal(expr, scope.parent)
+        return None
     if isinstance(expr, Unary) and expr.prefix:
         if expr.op == "-":
-            inner = _extract_literal(expr.operand)
+            inner = _extract_literal(expr.operand, scope)
             if isinstance(inner, (int, float)):
                 return -inner
         elif expr.op == "+":
-            inner = _extract_literal(expr.operand)
+            inner = _extract_literal(expr.operand, scope)
             if isinstance(inner, (int, float)):
                 return inner
         elif expr.op in ("&", "*"):
             return None
     if isinstance(expr, Binary):
-        left = _extract_literal(expr.left)
-        right = _extract_literal(expr.right)
+        left = _extract_literal(expr.left, scope)
+        right = _extract_literal(expr.right, scope)
         if left is None or right is None:
             return None
         if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
@@ -332,6 +370,7 @@ class Structor:
         self._collect_user_funcs(self.ast)
         self._walk_program(self.ast, program_scope)
         self._link_callee_children()
+        self._propagate_all_values()
         sorted_keys = sorted(self._order, key=lambda k: self._order[k])
         return [self.objects[k] for k in sorted_keys]
 
@@ -384,9 +423,12 @@ class Structor:
             if node.expr is not None:
                 self._walk_expr(node.expr, scope)
                 if self._func_callee_stack:
-                    v = _extract_literal(node.expr)
+                    callee = self._func_callee_stack[-1]
+                    callee.add_return_expression(node.expr)
+                    v = _extract_literal(node.expr, scope)
                     if v is not None:
-                        self._func_callee_stack[-1].value = v
+                        callee.set_computed_value(v)
+                    callee.has_return = True
         elif isinstance(node, ExprStmt):
             if node.expr is not None:
                 self._walk_expr(node.expr, scope)
@@ -412,7 +454,9 @@ class Structor:
     def _walk_declaration(self, node: Declaration, scope: Scope):
         """Register a variable declaration as a Callee with its initial value."""
         value = (
-            _extract_literal(node.initializer) if node.initializer is not None else None
+            _extract_literal(node.initializer, scope)
+            if node.initializer is not None
+            else None
         )
         callee = Callee(node.name, scope, value, var_type=node.var_type)
         self._register(callee, scope)
@@ -457,10 +501,24 @@ class Structor:
             self._walk_expr(node.target, scope)
             self._walk_expr(node.value, scope)
         elif isinstance(node, Binary):
-            self._walk_expr(node.left, scope)
-            self._walk_expr(node.right, scope)
+            left_val = _extract_literal(node.left, scope)
+            right_val = _extract_literal(node.right, scope)
+            if left_val is not None and right_val is not None:
+                if isinstance(left_val, (int, float)) and isinstance(
+                    right_val, (int, float)
+                ):
+                    return _numeric_binary(node.op, left_val, right_val)
+            return None
         elif isinstance(node, Unary):
-            self._walk_expr(node.operand, scope)
+            operand_val = self._walk_expr(node.operand, scope)
+            if operand_val is not None:
+                if node.op == "-":
+                    if isinstance(operand_val, (int, float)):
+                        return -operand_val
+                elif node.op == "+":
+                    if isinstance(operand_val, (int, float)):
+                        return operand_val
+            return None
         elif isinstance(node, ArrayAccess):
             self._walk_expr(node.array, scope)
             self._walk_expr(node.index, scope)
@@ -498,6 +556,15 @@ class Structor:
         caller_name = f"call_{callee_name}_{self._next_id()}"
         caller = Caller(caller_name, scope)
         caller.call(callee_node, *args)
+
+        # Link caller to callee and set arguments
+        caller.assign_callee(callee_node)
+        caller.set_arguments(args)
+
+        # Propagate callee's computed value if available
+        if callee_node.has_constant_value():
+            caller.propagate_value(callee_node.value)
+
         self._register(caller, scope)
 
         # Walk args for nested calls
@@ -518,6 +585,58 @@ class Structor:
                     "callers": callee_node.scope.callers,
                     "generic": callee_node.scope.children,
                 }
+
+    def _propagate_all_values(self):
+        """Propagate computed values from callees to callers.
+
+        Evaluates each callee's return_expression AST and propagates the
+        result to all callers. Handles recursive calls by tracking visited
+        callees to avoid infinite loops.
+        """
+        visited = set()
+
+        def eval_return_expr(callee, visited_stack=None):
+            if visited_stack is None:
+                visited_stack = []
+
+            if callee.name in visited:
+                return None
+            if callee in visited_stack:
+                return None
+
+            visited_stack = list(visited_stack)
+            visited_stack.append(callee)
+
+            return_expr = callee.get_return_expression()
+            if return_expr is None:
+                return None
+
+            scope = callee.scope
+            result = self._walk_expr(return_expr, scope)
+
+            if result is not None:
+                return result
+
+            for obj in self.objects.values():
+                if isinstance(obj, Caller):
+                    dep = obj.dependencies[0] if obj.dependencies else (None, [])
+                    if dep[0] is callee:
+                        if obj.value is not None:
+                            return obj.value
+
+            return None
+
+        for obj in self.objects.values():
+            if isinstance(obj, Caller) and obj._callee_ref is not None:
+                callee = obj._callee_ref
+                if callee.has_constant_value():
+                    obj.propagated_value = callee.value
+                elif callee.get_return_expression() is not None:
+                    result = eval_return_expr(callee)
+                    if result is not None:
+                        obj.propagated_value = result
+
+        visited.clear()
 
 
 # ============================================================
