@@ -198,6 +198,14 @@ class Cast(Node):
 
 
 @dataclass
+class Include(Node):
+    """#include directive."""
+
+    path: str
+    is_system: bool  # True for <foo>, False for "foo"
+
+
+@dataclass
 class InitList(Node):
     """Brace-enclosed initializer list: { expr, expr, ... }"""
 
@@ -211,14 +219,39 @@ class InitList(Node):
 
 # Type keyword token types used throughout the parser.
 _TYPE_TOKENS = (
-    "INT", "CHAR", "VOID", "FLOAT", "DOUBLE", "SHORT", "LONG",
-    "SIGNED", "UNSIGNED", "STRUCT", "UNION", "ENUM", "TYPEDEF",
-    "CONST", "VOLATILE", "STATIC", "EXTERN", "INLINE", "REGISTER",
-    "AUTO", "SIZEOF", "UNKNOWN",
+    "INT",
+    "CHAR",
+    "VOID",
+    "FLOAT",
+    "DOUBLE",
+    "SHORT",
+    "LONG",
+    "SIGNED",
+    "UNSIGNED",
+    "STRUCT",
+    "UNION",
+    "ENUM",
+    "TYPEDEF",
+    "CONST",
+    "VOLATILE",
+    "STATIC",
+    "EXTERN",
+    "INLINE",
+    "REGISTER",
+    "AUTO",
+    "SIZEOF",
+    "UNKNOWN",
 )
 _BASE_TYPE_TOKENS = (
-    "INT", "CHAR", "VOID", "FLOAT", "DOUBLE", "SHORT", "LONG",
-    "SIGNED", "UNSIGNED",
+    "INT",
+    "CHAR",
+    "VOID",
+    "FLOAT",
+    "DOUBLE",
+    "SHORT",
+    "LONG",
+    "SIGNED",
+    "UNSIGNED",
 )
 
 
@@ -317,17 +350,43 @@ class Parser:
             decls.append(self.parse_external())
         return Program(decls)
 
+    def _parse_preprocessor(self, directive: str) -> Node:
+        """Parse a preprocessor directive."""
+        stripped = directive.strip()
+        if stripped.startswith("#include"):
+            rest = stripped[len("#include") :].strip()
+            if rest.startswith("<") and ">" in rest:
+                start = rest.index("<")
+                end = rest.index(">")
+                path = rest[start + 1 : end]
+                return Include(path, is_system=True)
+            elif rest.startswith('"') and rest.count('"') >= 2:
+                start = rest.index('"')
+                end = rest.index('"', start + 1)
+                path = rest[start + 1 : end]
+                return Include(path, is_system=False)
+        return None
+
     def parse_external(self) -> Node:
         """
         Parse global declarations:
         - Functions
         - Function prototypes
         - Global variables
+        - Include directives
         """
         t = self.peek()
 
-        # Preprocessor directives and comments are skipped silently.
-        if t[0] in ("PREPROCESSOR", "COMMENT_MULTI", "COMMENT_LINE"):
+        # Handle preprocessor directives
+        if t[0] == "PREPROCESSOR":
+            directive = self.advance()[1]
+            result = self._parse_preprocessor(directive)
+            if result is not None:
+                return result
+            return self.parse_external()
+
+        # Skip comments
+        if t[0] in ("COMMENT_MULTI", "COMMENT_LINE"):
             self.advance()
             return self.parse_external()
 
@@ -452,8 +511,18 @@ class Parser:
             init = None
             if self.peek()[0] != "SEMICOLON":
                 if self.peek()[0] in (
-                    "INT", "CHAR", "VOID", "FLOAT", "DOUBLE", "LONG", "SHORT",
-                    "SIGNED", "UNSIGNED", "STRUCT", "UNION", "ENUM",
+                    "INT",
+                    "CHAR",
+                    "VOID",
+                    "FLOAT",
+                    "DOUBLE",
+                    "LONG",
+                    "SHORT",
+                    "SIGNED",
+                    "UNSIGNED",
+                    "STRUCT",
+                    "UNION",
+                    "ENUM",
                 ):
                     typ = self.advance()[1]
                     idtok = self.expect("IDENTIFIER")
@@ -545,9 +614,20 @@ class Parser:
 
         # Local declaration
         if t[0] in (
-            "INT", "CHAR", "VOID", "FLOAT", "DOUBLE", "LONG", "SHORT",
-            "SIGNED", "UNSIGNED", "STRUCT", "UNION", "ENUM",
-            "CONST", "VOLATILE",
+            "INT",
+            "CHAR",
+            "VOID",
+            "FLOAT",
+            "DOUBLE",
+            "LONG",
+            "SHORT",
+            "SIGNED",
+            "UNSIGNED",
+            "STRUCT",
+            "UNION",
+            "ENUM",
+            "CONST",
+            "VOLATILE",
         ) or (t[0] == "IDENTIFIER" and t[1] in ("va_list",)):
             qualifiers = []
             # Collect any leading type qualifiers
@@ -824,14 +904,33 @@ class Parser:
             return Var(self.advance()[1])
         if tok[0] in ("INT_LITERAL", "FLOAT_LITERAL", "STRING_LITERAL", "CHAR_LITERAL"):
             return Literal(self.advance()[1])
+        if tok[0] == "SIZEOF":
+            self.advance()
+            self.expect("LPAREN")
+            if self.peek()[0] in _TYPE_TOKENS:
+                type_node = self.parse_type_expression()
+                self.expect("RPAREN")
+                return Unary(op="sizeof", operand=type_node, prefix=True)
+            operand = self.parse_expression()
+            self.expect("RPAREN")
+            return Unary(op="sizeof", operand=operand, prefix=True)
         if tok[0] == "LBRACE":
             # Brace-init list in expression position
             return self.parse_init_list()
         if tok[0] == "LPAREN":
             self.advance()
             if self.peek()[0] in (
-                "INT", "CHAR", "VOID", "FLOAT", "DOUBLE", "SHORT", "LONG",
-                "SIGNED", "UNSIGNED", "CONST", "VOLATILE",
+                "INT",
+                "CHAR",
+                "VOID",
+                "FLOAT",
+                "DOUBLE",
+                "SHORT",
+                "LONG",
+                "SIGNED",
+                "UNSIGNED",
+                "CONST",
+                "VOLATILE",
             ):
                 type_node = self.parse_type_expression()
                 while self.peek()[0] == "MULTIPLY":
