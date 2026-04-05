@@ -31,10 +31,10 @@ def parse_args():
 def print_tokens(tokens):
     """Pretty-print a token list, one token per line."""
     width = max(len(t[0]) for t in tokens)
-    print("┌─ Tokens " + "─" * (width + 24) + "┐")
+    print("\u250c\u2500 Tokens " + "\u2500" * (width + 24) + "\u2510")
     for typ, val in tokens:
-        print(f"│  {typ:<{width}}  {val!r}")
-    print("└" + "─" * (width + 26) + "┘")
+        print(f"\u2502  {typ:<{width}}  {val!r}")
+    print("\u2514" + "\u2500" * (width + 26) + "\u2518")
 
 
 def print_objects(objects):
@@ -47,35 +47,38 @@ def print_objects(objects):
         scope_name = obj.scope.name
         by_scope.setdefault(scope_name, []).append(obj)
 
-    print("\n┌─ Scope Graph " + "─" * 40 + "┐")
+    print("\n\u250c\u2500 Scope Graph " + "\u2500" * 40 + "\u2510")
     for scope_name, nodes in by_scope.items():
         parent = nodes[0].scope.parent
         parent_str = f"  (parent: {parent.name})" if parent else ""
-        print("│")
-        print(f"│  scope: {scope_name}{parent_str}")
+        print("\u2502")
+        print(f"\u2502  scope: {scope_name}{parent_str}")
         for node in nodes:
             if isinstance(node, Callee):
+                # Determine kind correctly:
+                # 1. Pointer variables -> their type string
+                # 2. Library callees   -> 'library'
+                # 3. User functions    -> 'function'  (is_variable=False, value=None)
+                # 4. Variables         -> kind from value (integer/float/string/none)
                 if node.var_type and "*" in node.var_type:
                     kind = node.var_type
                 elif node.is_library:
                     kind = "library"
-                elif callable(node.value):
-                    kind = "function"
-                elif node.value is None and not node.is_library:
+                elif not node.is_variable:
                     kind = "function"
                 else:
-                    kind, val_repr = callee_value_display_parts(node.value)
+                    kind, _ = callee_value_display_parts(node.value)
                 val_repr = repr(node.value)
                 print(
-                    f"│    Callee  {node.name!r:<20} kind={kind:<12} value={val_repr}"
+                    f"\u2502    Callee  {node.name!r:<20} kind={kind:<12} value={val_repr}"
                 )
             elif isinstance(node, Caller):
                 callee_name = node.dependencies[0][0].name if node.dependencies else "?"
                 args = node.dependencies[0][1] if node.dependencies else []
                 args_str = ", ".join(repr(a) for a in args)
-                print(f"│    Caller  {node.name!r:<20} -> {callee_name}({args_str})")
-    print("│")
-    print("└" + "─" * 54 + "┘")
+                print(f"\u2502    Caller  {node.name!r:<20} -> {callee_name}({args_str})")
+    print("\u2502")
+    print("\u2514" + "\u2500" * 54 + "\u2518")
 
 
 def compile_file(path):

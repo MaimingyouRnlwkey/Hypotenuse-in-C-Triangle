@@ -3,6 +3,7 @@
 # Path to the parseable regression fixture (quoted where expanded to the shell
 # so paths containing spaces work).
 BASELINE := $(CURDIR)/test/baseline.ctri
+RETURNS := $(CURDIR)/test/function_returns.ctri
 
 # ---------------------------------------------------------------
 # install: install all Python dependencies needed to test/lint
@@ -30,12 +31,21 @@ typecheck:
 	@echo "--- Running compiler over parseable test inputs ---"
 	@echo "  Checking: $(BASELINE)"
 	@python3 src/main.py -t "$(BASELINE)" || (echo "FAILED: baseline.ctri" && exit 1)
+	@echo "  Checking: $(RETURNS)"
+	@python3 src/main.py -t "$(RETURNS)" || (echo "FAILED: function_returns.ctri" && exit 1)
 	@echo "--- All inputs passed ---"
 
 # ---------------------------------------------------------------
 # test: assert specific expected outputs from the structurer so
 #       regressions in scope tracking or value parsing are caught
 #       immediately on every push.
+#
+#       function_returns.ctri validates return value handling:
+#       - return expressions in functions (int getFive() { return 5; })
+#       - return a + b expressions in function bodies
+#       - return with parenthesized expressions (x + 10) * 2
+#       - return 0 in main()
+#       - void return (empty return;)
 # ---------------------------------------------------------------
 test: install lint typecheck
 	@echo "--- Test: negative number + value kind (issues #61, #83) ---"
