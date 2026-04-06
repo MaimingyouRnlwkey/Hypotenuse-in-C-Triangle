@@ -16,14 +16,14 @@ C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux EL
 
 ## Install Guide
 
-1. Make sure you have **Linux** and **Python 3**
+1. Make sure you have **Linux or MacOS** and **Python 3.14+**
 2. Clone the repo and `cd` into it
-3. Run `make`
+3. Run `make full-install`
 
 ```bash
 git clone https://github.com/setuser1/The-Hypotenuse-Compiler
 cd The-Hypotenuse-Compiler
-make
+make full-install
 ```
 
 ---
