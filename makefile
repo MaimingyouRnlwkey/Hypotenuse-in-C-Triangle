@@ -129,18 +129,22 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 # ---------------------------------------------------------------
-# full-install: install the binary to system (requires sudo or ~/.local/bin)
+# full-install: install the binary to system and set up PLIBS folder
 # ---------------------------------------------------------------
 full-install: build
 	@if [ -w /usr/local/bin ]; then \
 		cp dist/hypotenuse /usr/local/bin/hypotenuse; \
 		chmod +x /usr/local/bin/hypotenuse; \
 		echo "Installed to /usr/local/bin/hypotenuse"; \
+		sudo mkdir -p /usr/lib/PLIBS; \
+		echo "Created /usr/lib/PLIBS for libraries"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
 		chmod +x ~/.local/bin/hypotenuse; \
 		echo "Installed to ~/.local/bin/hypotenuse"; \
+		mkdir -p ~/.local/lib/PLIBS; \
+		echo "Created ~/.local/lib/PLIBS for libraries"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 

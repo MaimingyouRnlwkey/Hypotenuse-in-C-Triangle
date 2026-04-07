@@ -58,6 +58,8 @@ class CodeGen:
         self.source_path = source_path  # path to source file for plib lookup
         self._lines = []
         self._indent = 0
+        self._specific_imports = {}  # item -> (lib_name, namespace)
+        self._current_alias = {}  # lib_name -> alias
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
@@ -192,9 +194,19 @@ class CodeGen:
                 if isinstance(node.callee, Var)
                 else self._expr(node.callee)
             )
+            # Handle specific imports: using sin from <math> -> math_sin()
+            if hasattr(self, "_specific_imports") and callee in self._specific_imports:
+                lib_name, generated_name = self._specific_imports[callee]
+                # Use the actual generated function name from plib processing
+                if generated_name:
+                    callee = generated_name
+                else:
+                    # Fallback: construct from lib_name
+                    prefix = self._current_alias.get(lib_name, lib_name)
+                    callee = f"{prefix}_{callee}"
             # Handle namespace prefix like "lib:func" -> "lib:func" (leave as-is for plstd)
             # But "otherlib:func" -> "otherlib_func" for user libraries
-            if ":" in callee:
+            elif ":" in callee:
                 if callee.startswith("lib:"):
                     pass  # lib: stays as-is for plstd
                 else:
@@ -258,26 +270,42 @@ class CodeGen:
         imports = self.structor.get_imports()
         exposes = self.structor.get_exposes()
 
-        system_includes = set()
         local_imports = []
         alias_map = {}  # alias -> lib_name
+        seen_libs = set()
+        specific_imports = {}  # item -> lib_name (for "using X from <Y>")
 
         for imp in imports:
             source = imp.source
             if source.startswith("<") and source.endswith(">"):
+                # Treat <math> as a plib lookup, not a system header
                 lib_name = source[1:-1]
-                system_includes.add(lib_name)
+                if lib_name not in seen_libs:
+                    local_imports.append(lib_name)
+                    seen_libs.add(lib_name)
                 if imp.alias:
-                    alias_map[imp.alias] = (lib_name, "system")
+                    alias_map[imp.alias] = (lib_name, "local")
+                if imp.item:
+                    # Track specific imports: using sin from <math>
+                    specific_imports[imp.item] = lib_name
             elif "&" in source:
                 pass  # No include needed for scoped imports (X&Y)
             else:
-                local_imports.append(source)
+                if source not in seen_libs:
+                    local_imports.append(source)
+                    seen_libs.add(source)
                 if imp.alias:
                     alias_map[imp.alias] = (source, "local")
+                if imp.item:
+                    specific_imports[imp.item] = source
 
-        for inc in sorted(system_includes):
-            self._emit(f"#include <{inc}.h>")
+        # Store for use in _expr
+        # Map: bare_name -> (lib_name, namespace)
+        self._specific_imports = {}
+        self._current_alias = {}
+        for item, lib_name in specific_imports.items():
+            # Will be updated when plib is processed
+            self._specific_imports[item] = (lib_name, None)
 
         for lib_name in local_imports:
             alias = None
@@ -285,6 +313,8 @@ class CodeGen:
                 if lib == lib_name and type_ == "local":
                     alias = a
                     break
+            if alias:
+                self._current_alias[lib_name] = alias
             self._gen_plib_code(lib_name, alias)
 
         for exp in exposes:
@@ -345,11 +375,27 @@ class CodeGen:
 
             # Handle SpaceDecl - generate with prefix + namespace prefix
             if isinstance(decl, p.SpaceDecl):
+                # Determine actual generated prefix
+                if prefix == decl.name:
+                    actual_prefix = prefix  # e.g., math_sin
+                else:
+                    actual_prefix = f"{prefix}_{decl.name}"  # e.g., lib_utils_func
+
+                # Update specific imports mapping with actual generated prefix
                 for nested_decl in decl.declarations:
                     if isinstance(nested_decl, p.Function):
-                        nested_decl.name = f"{prefix}_{decl.name}_{nested_decl.name}"
+                        generated_name = f"{actual_prefix}_{nested_decl.name}"
+                        # Update mapping: sin -> math_sin
+                        if nested_decl.name in self._specific_imports:
+                            _, old_namespace = self._specific_imports[nested_decl.name]
+                            self._specific_imports[nested_decl.name] = (
+                                lib_name,
+                                generated_name,
+                            )
+
+                        nested_decl.name = generated_name
                     elif isinstance(nested_decl, p.Declaration):
-                        nested_decl.name = f"{prefix}_{decl.name}_{nested_decl.name}"
+                        nested_decl.name = f"{actual_prefix}_{nested_decl.name}"
                     self._gen_node(nested_decl)
             elif isinstance(
                 decl, (p.Function, p.Declaration, p.StructDef, p.Typedef, p.EnumDef)

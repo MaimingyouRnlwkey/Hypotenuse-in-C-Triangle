@@ -15,7 +15,7 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    parser.add_argument("files", nargs="+", help="Source file(s) to compile")
+    parser.add_argument("files", nargs="*", help="Source file(s) to compile")
 
     parser.add_argument(
         "-t", "--tokens", action="store_true", help="Print lexical tokens and exit"
@@ -45,6 +45,20 @@ def parse_args():
         "--cflags",
         metavar="FLAGS",
         help="Pass extra flags to gcc (e.g., '$(sdl2-config --cflags --libs)')",
+    )
+
+    parser.add_argument(
+        "-i",
+        "--install",
+        metavar="PATH",
+        help="Install file to PLIBS folder (system or user)",
+    )
+
+    parser.add_argument(
+        "-r",
+        "--remove",
+        metavar="NAME",
+        help="Remove a .plib file from PLIBS folder by name",
     )
 
     return parser.parse_args()
@@ -158,8 +172,80 @@ def compile_with_gcc(c_path, output_path=None, extra_flags=None):
     return output_path
 
 
+def install_to_plibs(source_path):
+    """Install a file to the PLIBS folder (system or user)."""
+    import shutil
+    import os
+
+    if not os.path.exists(source_path):
+        print(f"Error: file not found: {source_path}")
+        return
+
+    filename = os.path.basename(source_path)
+    if not filename.endswith(".plib"):
+        print(f"Error: only .plib files can be installed, got '{filename}'")
+        return
+
+    # Try system location first, then user location
+    system_plibs = "/usr/lib/PLIBS"
+    user_plibs = os.path.expanduser("~/.local/lib/PLIBS")
+
+    if os.path.exists(system_plibs) and os.access(system_plibs, os.W_OK):
+        dest = os.path.join(system_plibs, filename)
+        shutil.copy2(source_path, dest)
+        print(f"Installed to {dest}")
+    elif os.access(os.path.dirname(user_plibs), os.W_OK) or not os.path.exists(
+        user_plibs
+    ):
+        os.makedirs(user_plibs, exist_ok=True)
+        dest = os.path.join(user_plibs, filename)
+        shutil.copy2(source_path, dest)
+        print(f"Installed to {dest}")
+    else:
+        print("Error: no writable PLIBS folder found")
+        return
+
+
+def remove_from_plibs(name):
+    """Remove a .plib file from PLIBS folder by name."""
+    import os
+
+    if not name.endswith(".plib"):
+        name = name + ".plib"
+
+    # Try both locations
+    system_plibs = "/usr/lib/PLIBS"
+    user_plibs = os.path.expanduser("~/.local/lib/PLIBS")
+
+    removed = False
+    for plibs_dir in [system_plibs, user_plibs]:
+        path = os.path.join(plibs_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Removed from {path}")
+            removed = True
+            break
+
+    if not removed:
+        print(f"Error: '{name}' not found in any PLIBS folder")
+
+
 def main():
     args = parse_args()
+
+    # -----------------------------
+    # Install mode
+    # -----------------------------
+    if args.install:
+        install_to_plibs(args.install)
+        return
+
+    # -----------------------------
+    # Remove mode
+    # -----------------------------
+    if args.remove:
+        remove_from_plibs(args.remove)
+        return
 
     for path in args.files:
         if not path.endswith(".ctri"):
