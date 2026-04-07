@@ -189,7 +189,7 @@ typed struct PoliceDog&Dog&Animal(string name, int badge) { ... }
 ### C△-specific keywords
 
 - `using` — import: `using random from <math>`, `using helper from "utils"`, `using scope&myVar`
-- `show` — globalize a library/namespace: `show plstd`, `show lib:io`
+- `expose` — globalize a library/namespace: `expose plstd`, `expose lib:io`
 - `lib:` — explicit plstd access without globalizing: `lib:printd(42)`
 - `space` — namespace declaration (in `.plib` files)
 - `allocate` — heap allocation: `allocate int buf[256]`, `allocate int x(200) = val`

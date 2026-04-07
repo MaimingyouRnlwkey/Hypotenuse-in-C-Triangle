@@ -35,6 +35,42 @@ class Program(Node):
 
 
 @dataclass
+class UsingDecl(Node):
+    """using statement for imports.
+
+    item: specific item to import (None means import all)
+    source: "<lib>" for system, "\"path\"" for local, "scope&name" for scoped
+    alias: optional rename
+    """
+
+    item: Optional[str]
+    source: str
+    alias: Optional[str] = None
+
+
+@dataclass
+class ExposeDecl(Node):
+    """expose statement to globalize a namespace."""
+
+    target: str
+
+
+@dataclass
+class LibAccess(Node):
+    """lib:symbol - explicit plstd access."""
+
+    symbol: str
+
+
+@dataclass
+class SpaceDecl(Node):
+    """space statement to declare a namespace."""
+
+    name: str
+    declarations: List[Node]
+
+
+@dataclass
 class Function(Node):
     """Function definition."""
 
@@ -622,6 +658,15 @@ class Parser:
                 )
             )
 
+        if t[0] == "USING":
+            return self.parse_using()
+
+        if t[0] == "EXPOSE":
+            return self.parse_expose()
+
+        if t[0] == "SPACE":
+            return self.parse_space()
+
         if t[0] == "TYPEDEF":
             return self.parse_typedef()
 
@@ -836,17 +881,177 @@ class Parser:
             # extend it below instead).
             return _MultiDecl(decls)
 
+    def parse_using(self) -> UsingDecl:
+        """Parse a using statement.
+
+        Forms:
+            using "x"           # import all from local
+            using "x" as y      # import all with alias
+            using X from <Y>    # import specific from system
+            using X from "Y"    # import specific from local
+            using X from <Y> as Z  # import with alias
+            using scope&X       # import from scoped
+            using main&X       # import from scoped (any identifier)
+            using foo&X as Y  # import from scoped with alias
+        """
+        self.expect("USING")
+        t = self.peek()
+
+        # Check for X& form (import from scoped, where X is any identifier like main, foo, etc.)
+        if t[0] == "IDENTIFIER":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "AMPERSAND":
+                # This is a scoped import: using X&Y
+                scope_name = self.advance()[1]
+                self.expect("AMPERSAND")
+                symbol_name = self.expect("IDENTIFIER")[1]
+                alias = self._parse_optional_alias()
+                self.expect("SEMICOLON")
+                return UsingDecl(
+                    item=None, source=f"{scope_name}&{symbol_name}", alias=alias
+                )
+
+        # Check if we're importing a specific item (identifier before "from")
+        if t[0] == "IDENTIFIER":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "FROM":
+                # Item specified: using X from ...
+                item = self.advance()[1]
+                self.expect("FROM")
+                source = self._parse_import_source()
+                alias = self._parse_optional_alias()
+                self.expect("SEMICOLON")
+                return UsingDecl(item=item, source=source, alias=alias)
+            elif next_tok and next_tok[0] == "AS":
+                # Direct import with alias: using "x" as y
+                source = self.advance()[1]
+                alias = self._parse_optional_alias()
+                self.expect("SEMICOLON")
+                return UsingDecl(item=None, source=source, alias=alias)
+
+        # Check for string literal (import all from local)
+        if t[0] == "STRING_LITERAL":
+            source = self.advance()[1].strip('"')
+            alias = self._parse_optional_alias()
+            self.expect("SEMICOLON")
+            return UsingDecl(item=None, source=source, alias=alias)
+
+        # Check for system lib <x>
+        if t[0] == "LT":
+            source = self._parse_import_source()
+            alias = self._parse_optional_alias()
+            self.expect("SEMICOLON")
+            return UsingDecl(item=None, source=source, alias=alias)
+
         line = t[2] if len(t) > 2 else 0
         col = t[3] if len(t) > 3 else 0
         raise SyntaxError(
             error_msgs.get_error_msg(
                 "E001",
-                found=t[0],
+                found=t[1],
                 line=line,
                 col=col,
-                fallback=f"Unexpected token at line {line}, column {col}: {t}",
+                fallback=f"Invalid using statement at line {line}, column {col}",
             )
         )
+
+    def _parse_import_source(self) -> str:
+        """Parse the source of an import: <lib> or "path"."""
+        t = self.peek()
+        if t[0] == "LT":
+            self.expect("LT")
+            lib_name = self.expect("IDENTIFIER")[1]
+            self.expect("GT")
+            return f"<{lib_name}>"
+        elif t[0] == "STRING_LITERAL":
+            return self.advance()[1].strip('"')
+        else:
+            line = t[2] if len(t) > 2 else 0
+            col = t[3] if len(t) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found=t[1],
+                    line=line,
+                    col=col,
+                    fallback=f"Invalid import source at line {line}, column {col}",
+                )
+            )
+
+    def _parse_optional_alias(self) -> Optional[str]:
+        """Parse optional 'as' alias."""
+        if self.accept("AS"):
+            return self.expect("IDENTIFIER")[1]
+        return None
+
+    def _parse_lib_call(self, symbol: str) -> Node:
+        """Parse a lib:symbol(...) call."""
+        self.expect("LPAREN")
+        args = []
+        if self.peek()[0] != "RPAREN":
+            args.append(self.parse_assignment())
+            while self.accept("COMMA"):
+                args.append(self.parse_assignment())
+        self.expect("RPAREN")
+        # Convert to a Call node with lib: prefix
+        return Call(callee=Var(f"lib:{symbol}"), args=args)
+
+    def parse_expose(self) -> ExposeDecl:
+        """Parse an expose statement: expose namespace."""
+        self.expect("EXPOSE")
+        t = self.peek()
+        if t[0] == "IDENTIFIER":
+            target = self.advance()[1]
+            self.expect("SEMICOLON")
+            return ExposeDecl(target=target)
+        elif t[0] == "PLSTD":
+            self.advance()
+            self.expect("SEMICOLON")
+            return ExposeDecl(target="plstd")
+        else:
+            line = t[2] if len(t) > 2 else 0
+            col = t[3] if len(t) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found=t[1],
+                    line=line,
+                    col=col,
+                    fallback=f"Invalid expose statement at line {line}, column {col}",
+                )
+            )
+
+    def parse_space(self) -> SpaceDecl:
+        """Parse a namespace block declaration."""
+        self.expect("SPACE")
+        t = self.peek()
+        if t[0] == "IDENTIFIER":
+            name = self.advance()[1]
+            self.expect("LBRACE")
+            declarations = []
+            while True:
+                if self.peek()[0] == "RBRACE":
+                    self.advance()
+                    break
+                declarations.append(self.parse_external())
+            self.expect("SEMICOLON")
+            return SpaceDecl(name=name, declarations=declarations)
+        else:
+            line = t[2] if len(t) > 2 else 0
+            col = t[3] if len(t) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found=t[1],
+                    line=line,
+                    col=col,
+                    fallback=f"Invalid space statement at line {line}, column {col}",
+                )
+            )
 
     def parse_typedef(self) -> Node:
         """Parse a typedef declaration."""
@@ -1846,6 +2051,18 @@ class Parser:
                 # Convert arrow to (*expr).field for AST representation
                 deref = Unary(op="*", operand=node, prefix=True)
                 node = FieldAccess(deref, field_name)
+            elif self.peek()[0] == "COLON":
+                # Namespace access: namespace:symbol
+                self.advance()
+                if self.peek()[0] == "COLON":
+                    # Handle :: (two colons) for C++ style namespace
+                    self.advance()
+                    symbol = self.expect("IDENTIFIER")[1]
+                    node = Var(f"{node.name}::{symbol}")
+                else:
+                    # Single colon - treat as namespace prefix
+                    symbol = self.expect("IDENTIFIER")[1]
+                    node = Var(f"{node.name}:{symbol}")
             else:
                 break
         return node
@@ -1938,6 +2155,29 @@ class Parser:
     def parse_primary(self) -> Node:
         """Parse the most basic expression forms."""
         tok = self.peek()
+
+        # Handle lib:symbol - explicit plstd access
+        if tok[0] == "LIB":
+            self.expect("LIB")
+            self.expect("COLON")
+            if self.peek()[0] == "IDENTIFIER":
+                symbol = self.advance()[1]
+                # Check for method call like lib:printd(...)
+                if self.peek()[0] == "LPAREN":
+                    return self._parse_lib_call(symbol)
+                return LibAccess(symbol=symbol)
+            line = tok[2] if len(tok) > 2 else 0
+            col = tok[3] if len(tok) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found="lib:",
+                    line=line,
+                    col=col,
+                    fallback=f"Expected symbol after lib: at line {line}, column {col}",
+                )
+            )
+
         if tok[0] == "IDENTIFIER":
             return Var(self.advance()[1])
         if tok[0] in (

@@ -28,11 +28,11 @@ from parser import (
     Switch,
     StructDef,
     Typedef,
-    FieldAccess,
-    DesignatedInit,
+    UsingDecl,
+    ExposeDecl,
+    LibAccess,
+    SpaceDecl,
     TypeExpr,
-    Generic,
-    CompoundLiteral,
 )
 
 
@@ -51,10 +51,11 @@ TYPE_MAP = {
 
 
 class CodeGen:
-    def __init__(self, ast, structor, layouts=None):
+    def __init__(self, ast, structor, layouts=None, source_path=None):
         self.ast = ast
         self.structor = structor
         self.layouts = layouts or {}
+        self.source_path = source_path  # path to source file for plib lookup
         self._lines = []
         self._indent = 0
 
@@ -191,6 +192,13 @@ class CodeGen:
                 if isinstance(node.callee, Var)
                 else self._expr(node.callee)
             )
+            # Handle namespace prefix like "lib:func" -> "lib:func" (leave as-is for plstd)
+            # But "otherlib:func" -> "otherlib_func" for user libraries
+            if ":" in callee:
+                if callee.startswith("lib:"):
+                    pass  # lib: stays as-is for plstd
+                else:
+                    callee = callee.replace(":", "_")
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
@@ -240,8 +248,113 @@ class CodeGen:
     # ------------------------------------------------------------------
 
     def _gen_program(self, node):
+        self._gen_imports()
         for decl in node.declarations:
-            self._gen_node(decl)
+            if not isinstance(decl, (UsingDecl, ExposeDecl, SpaceDecl)):
+                self._gen_node(decl)
+
+    def _gen_imports(self):
+        """Generate import-related code (includes, exposes)."""
+        imports = self.structor.get_imports()
+        exposes = self.structor.get_exposes()
+
+        system_includes = set()
+        local_imports = []
+        alias_map = {}  # alias -> lib_name
+
+        for imp in imports:
+            source = imp.source
+            if source.startswith("<") and source.endswith(">"):
+                lib_name = source[1:-1]
+                system_includes.add(lib_name)
+                if imp.alias:
+                    alias_map[imp.alias] = (lib_name, "system")
+            elif "&" in source:
+                pass  # No include needed for scoped imports (X&Y)
+            else:
+                local_imports.append(source)
+                if imp.alias:
+                    alias_map[imp.alias] = (source, "local")
+
+        for inc in sorted(system_includes):
+            self._emit(f"#include <{inc}.h>")
+
+        for lib_name in local_imports:
+            alias = None
+            for a, (lib, type_) in alias_map.items():
+                if lib == lib_name and type_ == "local":
+                    alias = a
+                    break
+            self._gen_plib_code(lib_name, alias)
+
+        for exp in exposes:
+            # Check if the library was imported first
+            lib_imported = any(imp.source == exp.target for imp in imports)
+            if not lib_imported:
+                raise ValueError(
+                    f"Cannot expose '{exp.target}' - it must be imported first. "
+                    f'Use: using "{exp.target}" before exposing it.'
+                )
+            # Note: expose validation passes - the symbols are available via libname:func
+            # Future: could add #defines to make symbols global without prefix
+
+    def _gen_plib_code(self, lib_name: str, alias: str = None):
+        """Generate code from a local plib file."""
+        import os
+        import lexer
+        import parser as p
+
+        search_dirs = []
+        if self.source_path:
+            search_dirs.append(os.path.dirname(self.source_path))
+        search_dirs.extend(
+            [
+                ".",
+                os.path.expanduser("~/.local/lib/PLIBS"),
+                "/usr/lib/PLIBS",
+            ]
+        )
+
+        plib_path = None
+        for d in search_dirs:
+            candidate = os.path.join(d, f"{lib_name}.plib")
+            if os.path.exists(candidate):
+                plib_path = candidate
+                break
+
+        if not plib_path:
+            return
+
+        with open(plib_path, "r") as f:
+            plib_content = f.read()
+
+        tokens = lexer.Lexer(plib_content).lex()
+        tokens.append(("EOF", "EOF", 0, 0))
+        plib_ast = p.Parser(tokens).parse_program()
+
+        # Determine the prefix to use - alias if provided, else lib_name
+        prefix = alias if alias else lib_name
+
+        for decl in plib_ast.declarations:
+            # Apply alias prefix to top-level declarations
+            if alias:
+                if isinstance(decl, p.Function):
+                    decl.name = f"{prefix}_{decl.name}"
+                elif isinstance(decl, p.Declaration):
+                    decl.name = f"{prefix}_{decl.name}"
+
+            # Handle SpaceDecl - generate with prefix + namespace prefix
+            if isinstance(decl, p.SpaceDecl):
+                for nested_decl in decl.declarations:
+                    if isinstance(nested_decl, p.Function):
+                        nested_decl.name = f"{prefix}_{decl.name}_{nested_decl.name}"
+                    elif isinstance(nested_decl, p.Declaration):
+                        nested_decl.name = f"{prefix}_{decl.name}_{nested_decl.name}"
+                    self._gen_node(nested_decl)
+            elif isinstance(
+                decl, (p.Function, p.Declaration, p.StructDef, p.Typedef, p.EnumDef)
+            ):
+                self._gen_node(decl)
 
     # ------------------------------------------------------------------
     # Statement / declaration dispatcher
@@ -292,6 +405,15 @@ class CodeGen:
             self._gen_asm_block(node)
         elif hasattr(node, "__class__") and node.__class__.__name__ == "AsmBlock":
             self._gen_asm_block(node)
+        elif isinstance(node, UsingDecl):
+            pass  # Imports handled in header generation
+        elif isinstance(node, ExposeDecl):
+            pass  # Expose handled in header generation
+        elif isinstance(node, LibAccess):
+            pass  # Handled in expression context
+        elif isinstance(node, SpaceDecl):
+            for decl in node.declarations:
+                self._gen_statement(decl)
         else:
             # Expression used as a statement (e.g. bare assignment at top level)
             self._emit(f"{self._expr(node)};")

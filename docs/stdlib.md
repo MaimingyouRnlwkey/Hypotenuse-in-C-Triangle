@@ -14,10 +14,10 @@
 
 ```c
 // Globalize all of plstd
-show plstd
+expose plstd
 
 // Globalize one module
-show lib:io
+expose lib:io
 
 // Explicit access without globalizing
 lib:printd(42);

@@ -121,7 +121,7 @@ def compile_file(path):
     objects = structor.build_from_ast()
 
     # 🔥 ACTUAL COMPILATION
-    codegen_obj = codegen.CodeGen(ast, structor)
+    codegen_obj = codegen.CodeGen(ast, structor, source_path=path)
     output = codegen_obj.generate()
 
     return tokens, output, objects

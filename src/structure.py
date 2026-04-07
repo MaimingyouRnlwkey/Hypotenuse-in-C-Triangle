@@ -25,6 +25,10 @@ from parser import (
     EnumDef,
     Typedef,
     FieldAccess,
+    UsingDecl,
+    ExposeDecl,
+    LibAccess,
+    SpaceDecl,
 )
 
 
@@ -672,6 +676,11 @@ class Structor:
         self._source_content = source_content or ""
         self._structs = {}
         self._typedefs = {}
+        # Import system
+        self._imports: list = []  # All UsingDecl nodes
+        self._exposes: list = []  # All ExposeDecl nodes
+        self._import_table: dict = {}  # namespace -> {symbol -> resolved}
+        self._used_symbols: set = set()  # Track what's actually used
 
     def _next_id(self):
         self._counter += 1
@@ -776,6 +785,15 @@ class Structor:
             self._walk_typedef(node, scope)
         elif isinstance(node, FieldAccess):
             self._walk_field_access(node, scope)
+        elif isinstance(node, UsingDecl):
+            self._walk_using(node, scope)
+        elif isinstance(node, ExposeDecl):
+            self._walk_expose(node, scope)
+        elif isinstance(node, LibAccess):
+            self._walk_lib_access(node, scope)
+        elif isinstance(node, SpaceDecl):
+            for decl in node.declarations:
+                self._walk_node(decl, scope)
 
     def _walk_function(self, node: Function, parent_scope: Scope):
         self._user_funcs.add(node.name)
@@ -1005,6 +1023,37 @@ class Structor:
         """Process field access expression."""
         self._walk_expr(node.obj, scope)
 
+    def _walk_using(self, node: UsingDecl, scope: Scope):
+        """Process a using declaration."""
+        self._imports.append(node)
+        # Register in import table
+        namespace = self._get_namespace(node.source)
+        if namespace not in self._import_table:
+            self._import_table[namespace] = {}
+        # Add to import table
+        if node.alias:
+            self._import_table[namespace][node.alias] = node.item
+        elif node.item:
+            self._import_table[namespace][node.item] = node.item
+
+    def _walk_expose(self, node: ExposeDecl, scope: Scope):
+        """Process an expose declaration."""
+        self._exposes.append(node)
+
+    def _walk_lib_access(self, node: LibAccess, scope: Scope):
+        """Process a lib: symbol access."""
+        self._used_symbols.add(f"lib:{node.symbol}")
+
+    def _get_namespace(self, source: str) -> str:
+        """Derive namespace from import source."""
+        if source.startswith("<") and source.endswith(">"):
+            return source[1:-1]  # <math> -> math
+        elif "&" in source:
+            # Scoped import: X&Y -> X
+            return source.split("&")[0]
+        else:
+            return source  # "utils" -> utils
+
     def get_struct_info(self, name):
         """Get StructInfo by struct name or typedef target."""
         return self._structs.get(name)
@@ -1022,6 +1071,18 @@ class Structor:
     def get_typedefs(self):
         """Return all registered typedef infos."""
         return self._typedefs
+
+    def get_imports(self):
+        """Return all using declarations."""
+        return self._imports
+
+    def get_exposes(self):
+        """Return all expose declarations."""
+        return self._exposes
+
+    def get_import_table(self):
+        """Return the import table."""
+        return self._import_table
 
     # ------------------------------------------------------------------
     # Post-processing

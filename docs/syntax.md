@@ -56,10 +56,10 @@ using random from <math>
 using helper from "utils"
 
 // Globalize an entire library (all symbols in scope)
-show plstd
+expose plstd
 
 // Globalize one module from plstd
-show lib:io
+expose lib:io
 
 // Intra-file immutable reference
 using scope&myVar
@@ -271,6 +271,6 @@ See [assembly.md](assembly.md) for full details.
 myspace:random()
 
 // Globalize a namespace
-show myspace
+expose myspace
 random()   // now accessible directly
 ```
