@@ -263,10 +263,22 @@ class CodeGen:
         self._gen_imports()
         for decl in node.declarations:
             if not isinstance(decl, (UsingDecl, ExposeDecl, SpaceDecl)):
+                # When structor is None, includes/defines were already handled in _gen_imports
+                if self.structor is None and isinstance(decl, (Include, Define)):
+                    continue
                 self._gen_node(decl)
 
     def _gen_imports(self):
         """Generate import-related code (includes, exposes)."""
+        if self.structor is None:
+            # No structor - just emit includes/defines from AST directly
+            for decl in self.ast.declarations:
+                if isinstance(decl, Include):
+                    self._gen_include(decl)
+                elif isinstance(decl, Define):
+                    self._emit(decl.directive)
+            return
+
         imports = self.structor.get_imports()
         exposes = self.structor.get_exposes()
 
@@ -460,6 +472,8 @@ class CodeGen:
         elif isinstance(node, SpaceDecl):
             for decl in node.declarations:
                 self._gen_statement(decl)
+        elif node is None:
+            pass  # Skip None declarations (e.g., skipped extern "C" blocks)
         else:
             # Expression used as a statement (e.g. bare assignment at top level)
             self._emit(f"{self._expr(node)};")
@@ -509,6 +523,22 @@ class CodeGen:
         typ = self._map_type(node.var_type)
         name = node.name
         array_size = getattr(node, "array_size", None)
+
+        # Handle function prototypes: var_type is "void (func prototype)"
+        if "(func prototype)" in node.var_type:
+            # Extract return type and params from name if stored
+            # For now, output a placeholder or skip
+            actual_type = node.var_type.replace(" (func prototype)", "")
+            actual_type = self._map_type(actual_type)
+            # Try to get params from node if available
+            params = getattr(node, "params", None)
+            if params:
+                param_str = ", ".join(f"{self._map_type(p[0])} {p[1]}" for p in params)
+                self._emit(f"{actual_type} {name}({param_str});")
+            else:
+                self._emit(f"{actual_type} {name}(void);")
+            return
+
         if array_size is not None:
             if isinstance(array_size, list):
                 dims = "".join(f"[{s}]" for s in array_size)

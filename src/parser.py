@@ -591,7 +591,9 @@ class Parser:
         """Parse entire translation unit."""
         decls = []
         while self.peek()[0] != "EOF":
-            decls.append(self.parse_external())
+            node = self.parse_external()
+            if node is not None:
+                decls.append(node)
         return Program(decls)
 
     def _parse_preprocessor(self, directive: str) -> Optional[Node]:
@@ -610,9 +612,10 @@ class Parser:
                 path = rest[start + 1 : end]
                 return Include(path, is_system=False)
         elif stripped.startswith("#define"):
-            # Store #define as a special node that will be emitted as-is
             return Define(directive)
-        return None
+        # For other preprocessor directives (#if, #ifdef, #ifndef, #endif, etc.)
+        # Return the directive as-is to be emitted
+        return Define(directive)
 
     def parse_external(self) -> Node:
         """
@@ -666,6 +669,26 @@ class Parser:
 
         if t[0] == "SPACE":
             return self.parse_space()
+
+        # Handle extern "C" { } - skip entirely (C doesn't need linkage specifiers)
+        if t[0] == "EXTERN":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "STRING_LITERAL" and next_tok[1] == '"C"':
+                self.advance()  # skip extern
+                self.advance()  # skip "C"
+                if self.peek()[0] == "LBRACE":
+                    self.advance()  # skip {
+                    depth = 1
+                    while self.i < len(self.tokens) and depth > 0:
+                        if self.peek()[0] == "LBRACE":
+                            depth += 1
+                        elif self.peek()[0] == "RBRACE":
+                            depth -= 1
+                        self.advance()
+                return None
+            # Not extern "C" - fall through
 
         if t[0] == "TYPEDEF":
             return self.parse_typedef()
@@ -828,7 +851,9 @@ class Parser:
                     return Function(typ, name, params, self.parse_compound())
                 else:
                     self.expect("SEMICOLON")
-                    return Declaration(f"{typ} (func prototype)", name, None)
+                    decl = Declaration(f"{typ} (func prototype)", name, None)
+                    decl.params = params  # Store params for codegen
+                    return decl
 
             # Global variable — may have comma-separated declarators
             # Handle array declaration (including multi-dimensional)
@@ -1012,18 +1037,18 @@ class Parser:
             self.advance()
             self.expect("SEMICOLON")
             return ExposeDecl(target="plstd")
-        else:
-            line = t[2] if len(t) > 2 else 0
-            col = t[3] if len(t) > 3 else 0
-            raise SyntaxError(
-                error_msgs.get_error_msg(
-                    "E001",
-                    found=t[1],
-                    line=line,
-                    col=col,
-                    fallback=f"Invalid expose statement at line {line}, column {col}",
-                )
-            )
+
+        return None
+
+    def parse_extern_c_block(self):
+        """Skip contents of extern \"C\" { } block (no-op in C)."""
+        while self.peek()[0] != "EOF":
+            if self.peek()[0] == "RBRACE":
+                self.expect("RBRACE")
+                break
+            # Skip each token until we hit the closing brace
+            self.advance()
+        return None  # Return None - extern "C" block is ignored in C
 
     def parse_space(self) -> SpaceDecl:
         """Parse a namespace block declaration."""
@@ -2053,6 +2078,9 @@ class Parser:
                 node = FieldAccess(deref, field_name)
             elif self.peek()[0] == "COLON":
                 # Namespace access: namespace:symbol
+                # Only valid when node is a Var (identifier)
+                if not isinstance(node, Var):
+                    break
                 self.advance()
                 if self.peek()[0] == "COLON":
                     # Handle :: (two colons) for C++ style namespace
