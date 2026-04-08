@@ -14,11 +14,11 @@ C△ supports all C11 primitive types plus several new first-class types designe
 | -------------- | ------- | ----------------------------- |
 | `int`          | 4 bytes | Signed 32-bit integer         |
 | `unsigned int` | 4 bytes | Unsigned 32-bit integer       |
-| `short`        | 2 bytes | Signed 16-bit integer         |
+| `short`        | 2 bytes | Signed 16-bit integer        |
 | `long`         | 8 bytes | Signed 64-bit integer         |
 | `char`         | 1 byte  | Single byte / ASCII character |
 | `float`        | 4 bytes | Single-precision float        |
-| `double`       | 8 bytes | Double-precision float        |
+| `double`       | 8 bytes | Double-precision float       |
 | `void`         | —       | No type                       |
 
 ---
@@ -33,6 +33,7 @@ C△ supports standard C-style pointers with the `*` syntax.
 int* ptr;           // Pointer to int
 int** ptr2;         // Pointer to pointer
 char* str;          // Pointer to char (string)
+void* vptr;         // Generic pointer
 ```
 
 ### Address-of and Dereference
@@ -45,9 +46,9 @@ int y = *ptr;       // Dereference operator *
 
 ---
 
-## _NEW_ C△ New Types
+## _future_ C△ New Types
 
-### `string` — First-class string
+### `string` — First-class string (future)
 
 ```c
 string greeting = "Hello, world!";
@@ -55,29 +56,23 @@ string name = "Hypotenuse";
 
 // Concatenation
 string full = greeting + " " + name;
-
-// f-string printing via plstd
-printfs("{greeting}, {name}!");
 ```
 
 ---
 
-### `auto` — Dynamic / Inferred Type
+### `auto` — Dynamic / Inferred Type (future)
 
 ```c
 auto x = 42;          // inferred as int
 auto s = "hello";     // inferred as string
 auto f = 3.14;        // inferred as double
-
-// Use %k format specifier for auto in printfs
-printf("%k", x);
 ```
 
 > `auto` is type-aware at runtime via the simulation pass.
 
 ---
 
-### `dynam` — Dynamic Array
+### `dynam` — Dynamic Array (future)
 
 ```c
 dynam int numbers = [1, 2, 3, 4, 5];
@@ -88,11 +83,10 @@ int size = len(numbers);
 ```
 
 > `dynam` arrays grow and shrink at runtime. No fixed capacity.
-> `len()` is a base function — see [syntax.md](syntax.md#base-functions).
 
 ---
 
-### `tuple` — Heterogeneous List
+### `tuple` — Heterogeneous List (future)
 
 ```c
 tuple t = [1, "hello", 3.14, 'x'];
@@ -100,9 +94,6 @@ auto first = t[0];    // 1
 auto second = t[1];   // "hello"
 int t_len = len(t);   // 4
 ```
-
-> Tuples are declared with `[]` and can hold mixed types.
-> `len()` is a base function — see [syntax.md](syntax.md#base-functions).
 
 ---
 
@@ -123,12 +114,12 @@ struct Vec2(float x, float y) {
 }
 
 Vec2 v = Vec2(3.0, 4.0);
-printd(v.length());   // 5.0
+printd("%f", v.length());   // 5.0
 ```
 
 ---
 
-### `Typed` Struct — Native Type + Inheritance
+### `typed` Struct — Native Type + Inheritance (future)
 
 Constructors, member functions, **inheritance**, becomes a native type.
 
@@ -146,10 +137,10 @@ typed struct Dog&Animal(string name) {
 }
 
 Dog d = Dog("Rex");
-printfs(d.speak());   // Woof!
+printd("%s", d.speak());   // Woof!
 ```
 
-#### Multiple Inheritance
+#### Multiple Inheritance (future)
 
 ```c
 typed struct PoliceDog&Dog&Animal(string name, int badge) {
@@ -167,7 +158,12 @@ typed struct PoliceDog&Dog&Animal(string name, int badge) {
 | Specifier | Type                      |
 | --------- | ------------------------- |
 | `%d`      | `int`                     |
+| `%ld`     | `long`                    |
+| `%lld`    | `long long`               |
+| `%u`      | `unsigned`                |
+| `%o`      | `octal`                   |
+| `%x` / `%X` | `hex` (lower/upper)      |
+| `%p`      | `pointer`                 |
 | `%f`      | `float` / `double`        |
 | `%s`      | `string` / `char*`        |
 | `%c`      | `char`                    |
-| `%k`      | `auto` (type-aware) _NEW_ |
