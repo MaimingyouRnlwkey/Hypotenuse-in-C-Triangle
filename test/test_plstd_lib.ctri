@@ -1,0 +1,8 @@
+#include <unistd.h>
+
+using <plstd>;
+
+int main() {
+    lib~printd("Using lib~ syntax: Hello %s, num=%d\n", "lib", 777);
+    return 0;
+}

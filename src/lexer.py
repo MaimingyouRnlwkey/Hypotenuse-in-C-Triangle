@@ -102,7 +102,7 @@ Tokens = [
     ("OR", re.compile(r"\|\|")),
     ("BITWISE_OR", re.compile(r"\|")),  # must come after OR (||)
     ("BITWISE_XOR", re.compile(r"\^")),
-    ("BITWISE_NOT", re.compile(r"~")),
+    ("TILDE", re.compile(r"~")),  # namespace separator
     ("AMPERSAND", re.compile(r"&")),  # must come after AND (&&)
     ("ELLIPSIS", re.compile(r"\.\.\.")),  # must come before DOT
     ("DOT", re.compile(r"\.")),

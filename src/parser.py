@@ -989,7 +989,11 @@ class Parser:
         t = self.peek()
         if t[0] == "LT":
             self.expect("LT")
-            lib_name = self.expect("IDENTIFIER")[1]
+            # Handle both IDENTIFIER and PLSTD (plstd is a reserved keyword)
+            if self.peek()[0] == "PLSTD":
+                lib_name = self.expect("PLSTD")[1]
+            else:
+                lib_name = self.expect("IDENTIFIER")[1]
             self.expect("GT")
             return f"<{lib_name}>"
         elif t[0] == "STRING_LITERAL":
@@ -1014,7 +1018,7 @@ class Parser:
         return None
 
     def _parse_lib_call(self, symbol: str) -> Node:
-        """Parse a lib:symbol(...) call."""
+        """Parse a lib~symbol(...) call."""
         self.expect("LPAREN")
         args = []
         if self.peek()[0] != "RPAREN":
@@ -1022,8 +1026,8 @@ class Parser:
             while self.accept("COMMA"):
                 args.append(self.parse_assignment())
         self.expect("RPAREN")
-        # Convert to a Call node with lib: prefix
-        return Call(callee=Var(f"lib:{symbol}"), args=args)
+        # Convert to a Call node with lib~ prefix
+        return Call(callee=Var(f"lib~{symbol}"), args=args)
 
     def parse_expose(self) -> ExposeDecl:
         """Parse an expose statement: expose namespace."""
@@ -2076,21 +2080,21 @@ class Parser:
                 # Convert arrow to (*expr).field for AST representation
                 deref = Unary(op="*", operand=node, prefix=True)
                 node = FieldAccess(deref, field_name)
-            elif self.peek()[0] == "COLON":
-                # Namespace access: namespace:symbol
+            elif self.peek()[0] == "TILDE":
+                # Namespace access: namespace~symbol
                 # Only valid when node is a Var (identifier)
                 if not isinstance(node, Var):
                     break
                 self.advance()
-                if self.peek()[0] == "COLON":
-                    # Handle :: (two colons) for C++ style namespace
+                if self.peek()[0] == "TILDE":
+                    # Handle ~~ (two tildes) for nested namespace
                     self.advance()
                     symbol = self.expect("IDENTIFIER")[1]
-                    node = Var(f"{node.name}::{symbol}")
+                    node = Var(f"{node.name}~~{symbol}")
                 else:
-                    # Single colon - treat as namespace prefix
+                    # Single tilde - treat as namespace prefix
                     symbol = self.expect("IDENTIFIER")[1]
-                    node = Var(f"{node.name}:{symbol}")
+                    node = Var(f"{node.name}~{symbol}")
             else:
                 break
         return node
@@ -2184,13 +2188,13 @@ class Parser:
         """Parse the most basic expression forms."""
         tok = self.peek()
 
-        # Handle lib:symbol - explicit plstd access
+        # Handle lib~symbol - explicit plstd access
         if tok[0] == "LIB":
             self.expect("LIB")
-            self.expect("COLON")
+            self.expect("TILDE")
             if self.peek()[0] == "IDENTIFIER":
                 symbol = self.advance()[1]
-                # Check for method call like lib:printd(...)
+                # Check for method call like lib~printd(...)
                 if self.peek()[0] == "LPAREN":
                     return self._parse_lib_call(symbol)
                 return LibAccess(symbol=symbol)
@@ -2199,10 +2203,10 @@ class Parser:
             raise SyntaxError(
                 error_msgs.get_error_msg(
                     "E001",
-                    found="lib:",
+                    found="lib~",
                     line=line,
                     col=col,
-                    fallback=f"Expected symbol after lib: at line {line}, column {col}",
+                    fallback=f"Expected symbol after lib~ at line {line}, column {col}",
                 )
             )
 

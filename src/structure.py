@@ -1041,8 +1041,8 @@ class Structor:
         self._exposes.append(node)
 
     def _walk_lib_access(self, node: LibAccess, scope: Scope):
-        """Process a lib: symbol access."""
-        self._used_symbols.add(f"lib:{node.symbol}")
+        """Process a lib~ symbol access."""
+        self._used_symbols.add(f"lib~{node.symbol}")
 
     def _get_namespace(self, source: str) -> str:
         """Derive namespace from import source."""

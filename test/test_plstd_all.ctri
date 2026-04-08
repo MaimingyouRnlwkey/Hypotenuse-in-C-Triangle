@@ -1,0 +1,8 @@
+#include <unistd.h>
+
+using <plstd>;
+
+int main() {
+    lib~printd("Import all test: Hello %s, num=%d\n", "all", 999);
+    return 0;
+}

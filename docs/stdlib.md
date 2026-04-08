@@ -17,10 +17,10 @@
 expose plstd
 
 // Globalize one module
-expose lib:io
+expose lib~io
 
 // Explicit access without globalizing
-lib:printd(42);
+lib~printd(42);
 ```
 
 > The compiler auto-imports what you use — manual imports are optional style.

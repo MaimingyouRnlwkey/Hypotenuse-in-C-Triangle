@@ -60,6 +60,10 @@ class CodeGen:
         self._indent = 0
         self._specific_imports = {}  # item -> (lib_name, namespace)
         self._current_alias = {}  # lib_name -> alias
+        self._generating_plib = False  # Flag to bypass checks when generating plib code
+        self._plstd_functions = set()  # Dynamically tracked plstd functions
+        self._plstd_exposed = False  # Whether plstd has been exposed
+        self._exposed_libs = set()  # Set of exposed library names
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
@@ -194,8 +198,50 @@ class CodeGen:
                 if isinstance(node.callee, Var)
                 else self._expr(node.callee)
             )
+
+            # FIRST: Check if plstd is exposed
+            # If exposed: lib~ prefix is allowed but optional (strip it)
+            # If NOT exposed: lib~ prefix IS required for plstd functions
+            # Skip this check when generating plib code itself
+            if (
+                not self._generating_plib
+                and hasattr(self, "_plstd_exposed")
+                and self._plstd_exposed
+            ):
+                # plstd is exposed - allow both direct call and lib~ prefix
+                actual_callee = callee
+                if callee.startswith("lib~"):
+                    actual_callee = callee[4:]
+                if actual_callee in self._plstd_functions:
+                    callee = actual_callee
+            elif (
+                not self._generating_plib
+                and hasattr(self, "_plstd_exposed")
+                and not self._plstd_exposed
+            ):
+                # plstd not exposed - lib~ prefix IS required for plstd functions
+                actual_callee = callee
+                if callee.startswith("lib~"):
+                    actual_callee = callee[4:]
+                if actual_callee in self._plstd_functions:
+                    if not callee.startswith("lib~"):
+                        raise ValueError(
+                            f"Function '{actual_callee}' requires 'lib~{actual_callee}()' syntax (plstd not exposed)."
+                        )
+                    callee = actual_callee
+
+            # Handle user namespace prefix like "mylib~helper" -> "mylib_helper"
+            # Check BEFORE specific imports since both may contain "~"
+            if "~" in callee and not callee.startswith("lib~"):
+                # Convert user namespace access to prefixed function name
+                callee = callee.replace("~", "_")
+            # Handle plstd namespace prefix like "lib~func" -> "lib:func"
+            elif callee.startswith("lib~"):
+                callee = callee.replace("~", ":", 1)
             # Handle specific imports: using sin from <math> -> math_sin()
-            if hasattr(self, "_specific_imports") and callee in self._specific_imports:
+            elif (
+                hasattr(self, "_specific_imports") and callee in self._specific_imports
+            ):
                 lib_name, generated_name = self._specific_imports[callee]
                 # Use the actual generated function name from plib processing
                 if generated_name:
@@ -204,13 +250,6 @@ class CodeGen:
                     # Fallback: construct from lib_name
                     prefix = self._current_alias.get(lib_name, lib_name)
                     callee = f"{prefix}_{callee}"
-            # Handle namespace prefix like "lib:func" -> "lib:func" (leave as-is for plstd)
-            # But "otherlib:func" -> "otherlib_func" for user libraries
-            elif ":" in callee:
-                if callee.startswith("lib:"):
-                    pass  # lib: stays as-is for plstd
-                else:
-                    callee = callee.replace(":", "_")
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
@@ -262,7 +301,16 @@ class CodeGen:
     def _gen_program(self, node):
         self._gen_imports()
         for decl in node.declarations:
-            if not isinstance(decl, (UsingDecl, ExposeDecl, SpaceDecl)):
+            if isinstance(decl, SpaceDecl):
+                # Handle SpaceDecl in main file - generate nested declarations with prefix
+                prefix = decl.name
+                for nested in decl.declarations:
+                    if isinstance(nested, Function):
+                        nested.name = f"{prefix}_{nested.name}"
+                    elif isinstance(nested, Declaration):
+                        nested.name = f"{prefix}_{nested.name}"
+                    self._gen_node(nested)
+            elif not isinstance(decl, (UsingDecl, ExposeDecl)):
                 # When structor is None, includes/defines were already handled in _gen_imports
                 if self.structor is None and isinstance(decl, (Include, Define)):
                     continue
@@ -290,16 +338,24 @@ class CodeGen:
         for imp in imports:
             source = imp.source
             if source.startswith("<") and source.endswith(">"):
-                # Treat <math> as a plib lookup, not a system header
+                # Treat <lib> as a plib lookup, not a system header
                 lib_name = source[1:-1]
+
+                # Handle <plstd> as special - look in plstd/ subfolder
+                if lib_name == "plstd":
+                    # Keep lib_name as "plstd" but the path will be plstd/plstd.plib
+                    actual_path = "plstd/plstd"
+                else:
+                    actual_path = lib_name
+
                 if lib_name not in seen_libs:
-                    local_imports.append(lib_name)
+                    local_imports.append(actual_path)
                     seen_libs.add(lib_name)
                 if imp.alias:
-                    alias_map[imp.alias] = (lib_name, "local")
+                    alias_map[imp.alias] = (actual_path, "local")
                 if imp.item:
                     # Track specific imports: using sin from <math>
-                    specific_imports[imp.item] = lib_name
+                    specific_imports[imp.item] = actual_path
             elif "&" in source:
                 pass  # No include needed for scoped imports (X&Y)
             else:
@@ -331,14 +387,30 @@ class CodeGen:
 
         for exp in exposes:
             # Check if the library was imported first
-            lib_imported = any(imp.source == exp.target for imp in imports)
+            # Normalize: both <plstd> and "plstd" should match "plstd"
+            exp_target = exp.target
+            if exp_target.startswith("<") and exp_target.endswith(">"):
+                exp_target = exp_target[1:-1]
+
+            lib_imported = any(
+                (imp.source == exp_target)
+                or (imp.source == f"<{exp_target}>")
+                or (imp.source == f'"{exp_target}"')
+                for imp in imports
+            )
             if not lib_imported:
                 raise ValueError(
                     f"Cannot expose '{exp.target}' - it must be imported first. "
                     f'Use: using "{exp.target}" before exposing it.'
                 )
-            # Note: expose validation passes - the symbols are available via libname:func
-            # Future: could add #defines to make symbols global without prefix
+            # Track that this library is now exposed
+            if exp.target == "plstd" or exp_target == "plstd":
+                self._plstd_exposed = True
+            elif exp.target.startswith("<") and exp.target.endswith(">"):
+                lib_name = exp.target[1:-1]
+                self._exposed_libs.add(lib_name)
+            else:
+                self._exposed_libs.add(exp.target)
 
     def _gen_plib_code(self, lib_name: str, alias: str = None):
         """Generate code from a local plib file."""
@@ -346,20 +418,37 @@ class CodeGen:
         import lexer
         import parser as p
 
+        # Bypass the plstd check when generating plib code itself
+        old_generating = self._generating_plib
+        self._generating_plib = True
+
         search_dirs = []
         if self.source_path:
             search_dirs.append(os.path.dirname(self.source_path))
-        search_dirs.extend(
-            [
-                ".",
-                os.path.expanduser("~/.local/lib/PLIBS"),
-                "/usr/lib/PLIBS",
-            ]
-        )
+
+        # Handle path with folder: plstd/printd -> look in plstd/ subfolder
+        if "/" in lib_name:
+            folder, filename = lib_name.split("/", 1)
+            search_dirs.extend(
+                [
+                    os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
+                    f"/usr/lib/PLIBS/{folder}",
+                ]
+            )
+        else:
+            search_dirs.extend(
+                [
+                    ".",
+                    os.path.expanduser("~/.local/lib/PLIBS"),
+                    "/usr/lib/PLIBS",
+                ]
+            )
 
         plib_path = None
+        # Extract just the filename for the plib search
+        search_name = lib_name.split("/")[-1]
         for d in search_dirs:
-            candidate = os.path.join(d, f"{lib_name}.plib")
+            candidate = os.path.join(d, f"{search_name}.plib")
             if os.path.exists(candidate):
                 plib_path = candidate
                 break
@@ -374,16 +463,33 @@ class CodeGen:
         tokens.append(("EOF", "EOF", 0, 0))
         plib_ast = p.Parser(tokens).parse_program()
 
+        # First, emit all includes from the plib at the top
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Include):
+                self._gen_include(decl)
+            elif isinstance(decl, p.Define):
+                self._emit(decl.directive)
+
         # Determine the prefix to use - alias if provided, else lib_name
-        prefix = alias if alias else lib_name
+        # For plstd/plstd, use no prefix (empty string)
+        if alias:
+            prefix = alias
+        elif lib_name.startswith("plstd/"):
+            prefix = ""  # No prefix for plstd
+        else:
+            prefix = lib_name
 
         for decl in plib_ast.declarations:
-            # Apply alias prefix to top-level declarations
-            if alias:
+            # Skip includes/defines - already handled above
+            if isinstance(decl, (p.Include, p.Define)):
+                continue
+
+            # Apply prefix to top-level declarations (if alias or plstd)
+            if alias or lib_name.startswith("plstd/"):
                 if isinstance(decl, p.Function):
-                    decl.name = f"{prefix}_{decl.name}"
+                    decl.name = f"{prefix}_{decl.name}" if prefix else decl.name
                 elif isinstance(decl, p.Declaration):
-                    decl.name = f"{prefix}_{decl.name}"
+                    decl.name = f"{prefix}_{decl.name}" if prefix else decl.name
 
             # Handle SpaceDecl - generate with prefix + namespace prefix
             if isinstance(decl, p.SpaceDecl):
@@ -412,7 +518,19 @@ class CodeGen:
             elif isinstance(
                 decl, (p.Function, p.Declaration, p.StructDef, p.Typedef, p.EnumDef)
             ):
+                # Update specific_imports mapping for this function
+                if isinstance(decl, p.Function) and decl.name in self._specific_imports:
+                    _, old_namespace = self._specific_imports[decl.name]
+                    self._specific_imports[decl.name] = (lib_name, decl.name)
+
+                # Track plstd functions if we're generating plstd
+                if lib_name.startswith("plstd/") and isinstance(decl, p.Function):
+                    self._plstd_functions.add(decl.name)
+
                 self._gen_node(decl)
+
+        # Restore the flag after generating plib code
+        self._generating_plib = old_generating
 
     # ------------------------------------------------------------------
     # Statement / declaration dispatcher

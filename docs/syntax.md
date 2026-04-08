@@ -59,13 +59,13 @@ using helper from "utils"
 expose plstd
 
 // Globalize one module from plstd
-expose lib:io
+expose lib~io
 
 // Intra-file immutable reference
 using scope&myVar
 
 // overwrite of syntax
-overwrite(int, lib:int)
+overwrite(int, lib~int)
 overwrite(base, examplelib) // overwriting base keywords with examplelib keywords.
 ```
 
@@ -267,10 +267,10 @@ See [assembly.md](assembly.md) for full details.
 ## Namespace Access
 
 ```c
-// Access a namespace member with ':'
-myspace:random()
+// Access a namespace member with '~'
+mySpace~random()
 
 // Globalize a namespace
-expose myspace
+expose mySpace
 random()   // now accessible directly
 ```

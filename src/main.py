@@ -248,8 +248,8 @@ def main():
         return
 
     for path in args.files:
-        if not path.endswith(".ctri"):
-            print(f"Error: Only .ctri files are supported, got '{path}'")
+        if not path.endswith((".ctri", ".plib")):
+            print(f"Error: Only .ctri/.plib files are supported, got '{path}'")
             continue
         try:
             tokens, output, objects = compile_file(path)
