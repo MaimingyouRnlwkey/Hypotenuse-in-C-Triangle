@@ -67,7 +67,8 @@ void printd(const char* fmt, ...) {
             else if (c == 'c') { print_c((char)va_arg(a, int)); }
             else if (c == 'f') { print_f(va_arg(a, double)); }
             else if (c == '%') { print_c('%'); }
-            else { print_c('%'); print_c(c); }
+            else if (c) { print_c('%'); print_c(c); }
+            // else: c == 0 (end of string), do nothing
         } else { print_c(*fmt); }
         fmt++;
     }
