@@ -57,6 +57,9 @@ using helper from "utils"
 // Globalize an entire library (all symbols in scope)
 expose plstd
 
+// Globalize a specific namespace from a library
+expose io@plstd;
+
 // Explicit access - function@namespace syntax
 printd@lib("value: %d\n", 42);
 
