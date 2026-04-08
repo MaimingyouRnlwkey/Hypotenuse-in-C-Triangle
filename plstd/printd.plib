@@ -73,4 +73,5 @@ void printd(const char* fmt, ...) {
         fmt++;
     }
     va_end(a);
+    print_c('\n');
 }
