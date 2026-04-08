@@ -136,19 +136,19 @@ full-install: build
 		cp dist/hypotenuse /usr/local/bin/hypotenuse; \
 		chmod +x /usr/local/bin/hypotenuse; \
 		echo "Installed to /usr/local/bin/hypotenuse"; \
-		sudo mkdir -p /usr/lib/PLIBS; \
-		echo "Created /usr/lib/PLIBS for libraries"; \
-		sudo cp -r plstd/* /usr/lib/PLIBS/; \
-		echo "Copied plstd files to /usr/lib/PLIBS/"; \
+		sudo mkdir -p /usr/lib/PLIBS/plstd; \
+		echo "Created /usr/lib/PLIBS/plstd"; \
+		sudo cp -r plstd /usr/lib/PLIBS/; \
+		echo "Copied plstd folder to /usr/lib/PLIBS/plstd"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
 		chmod +x ~/.local/bin/hypotenuse; \
 		echo "Installed to ~/.local/bin/hypotenuse"; \
-		mkdir -p ~/.local/lib/PLIBS; \
-		echo "Created ~/.local/lib/PLIBS for libraries"; \
-		cp -r plstd/* ~/.local/lib/PLIBS/; \
-		echo "Copied plstd files to ~/.local/lib/PLIBS/"; \
+		mkdir -p ~/.local/lib/PLIBS/plstd; \
+		echo "Created ~/.local/lib/PLIBS/plstd"; \
+		cp -r plstd ~/.local/lib/PLIBS/; \
+		echo "Copied plstd folder to ~/.local/lib/PLIBS/plstd"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 
