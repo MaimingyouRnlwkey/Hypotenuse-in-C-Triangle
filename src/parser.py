@@ -527,16 +527,6 @@ class Parser:
             typ = f"{typ} {typ2}"
         typ = self._consume_pointer_stars(typ)
 
-        # Handle function pointer syntax: int (*func)(int, int)
-        func_ptr_name = None
-        if self.peek()[0] == "LPAREN":
-            # This is a function pointer declaration
-            self.expect("LPAREN")
-            func_ptr_name = self.expect("IDENTIFIER")[1]
-            self.expect("RPAREN")
-            # Now we need to parse the function signature parameters if present
-            # For now, just note it's a function pointer - we'll handle params later
-
         # Allow literals after compound types (e.g., unsigned long long x = 0xFF)
         if self.peek()[0] not in (
             "IDENTIFIER",
@@ -797,76 +787,44 @@ class Parser:
                 params = []
 
                 if not self.accept("RPAREN"):
-                    # Handle void parameter (means no params)
                     if self.peek()[0] == "VOID":
-                        self.advance()  # consume void
+                        self.advance()
                         self.expect("RPAREN")
-                        params = []
                     else:
                         while True:
-                            type_qualifiers = []
+                            if self.accept("ELLIPSIS"):
+                                params.append(("...", "..."))
+                                self.expect("RPAREN")
+                                break
+
+                            qualifiers = []
                             while self.peek()[0] in ("CONST", "VOLATILE"):
-                                type_qualifiers.append(self.advance()[1])
+                                qualifiers.append(self.advance()[1])
 
                             ptype = self.advance()[1]
                             if ptype in self._typedefs:
                                 ptype = self._typedefs[ptype]
-                            elif (
-                                ptype == "struct" or ptype == "union" or ptype == "enum"
-                            ):
-                                if self.peek()[0] == "IDENTIFIER":
-                                    ptype = f"{ptype} {self.advance()[1]}"
                             elif self.peek()[0] in _BASE_TYPE_TOKENS:
-                                ptype2 = self.advance()[1]
-                                ptype = f"{ptype} {ptype2}"
+                                ptype = f"{ptype} {self.advance()[1]}"
+
                             ptype = self._consume_pointer_stars(ptype)
-
-                            # Handle type qualifiers AFTER pointer (like const after *)
-                            while self.peek()[0] in ("CONST", "VOLATILE"):
-                                type_qualifiers.append(self.advance()[1])
-
-                            # Prepend qualifiers if any
-                            if type_qualifiers:
-                                ptype = " ".join(type_qualifiers) + " " + ptype
+                            if qualifiers:
+                                ptype = " ".join(qualifiers) + " " + ptype
 
                             pname = self.expect("IDENTIFIER")[1]
-                            psize = None
-                            psize_list = []
-                            while self.accept("LBRACKET"):
-                                if self.peek()[0] == "INT_LITERAL":
-                                    psize_list.append(int(self.advance()[1]))
-                                elif self.peek()[0] == "IDENTIFIER":
-                                    psize_list.append(self.advance()[1])
-                                else:
-                                    psize_list.append(0)
-                                self.expect("RBRACKET")
-                            if psize_list:
-                                if len(psize_list) == 1:
-                                    psize = psize_list[0]
-                                else:
-                                    psize = psize_list
-                            params.append((ptype, pname, psize))
+                            params.append((ptype, pname, None))
+
                             if self.accept("COMMA"):
-                                # Handle variadic functions with ...
-                                if self.accept("ELLIPSIS"):
-                                    params.append(("...", "..."))
-                                    self.expect("RPAREN")
-                                    break
                                 continue
                             self.expect("RPAREN")
                             break
 
-                # Function definition vs prototype
                 if self.peek()[0] == "LBRACE":
                     return Function(typ, name, params, self.parse_compound())
-                else:
-                    self.expect("SEMICOLON")
-                    decl = Declaration(f"{typ} (func prototype)", name, None)
-                    decl.params = params  # Store params for codegen
-                    return decl
+                self.expect("SEMICOLON")
+                return Declaration(f"{typ} (prototype)", name, None)
 
-            # Global variable — may have comma-separated declarators
-            # Handle array declaration (including multi-dimensional)
+            # Global variable
             array_size = None
             sizes = []
             while self.accept("LBRACKET"):

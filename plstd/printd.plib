@@ -2,149 +2,74 @@
 #include <string.h>
 #include <stdarg.h>
 
-void print_char(char c) {
-    write(1, &c, 1);
-}
+void print_c(char c) { write(1, &c, 1); }
 
-void print_str(const char* s) {
-    if (s) {
-        write(1, s, strlen(s));
-    }
-}
+void print_s(const char* s) { if (s) write(1, s, strlen(s)); }
 
-void print_int(int n) {
-    if (n == 0) {
-        print_char('0');
-        return;
-    }
-    if (n < 0) {
-        print_char('-');
-        n = -n;
-    }
-    char buf[20];
-    int i = 0;
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    while (i > 0) {
-        print_char(buf[--i]);
-    }
-}
-
-void print_long(long n) {
-    if (n == 0) {
-        print_char('0');
-        return;
-    }
-    if (n < 0) {
-        print_char('-');
-        n = -n;
-    }
+void print_num(unsigned long n, int base, int upper) {
+    if (n == 0) { print_c('0'); return; }
     char buf[32];
     int i = 0;
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
+    while (n) {
+        int d = n % base;
+        buf[i++] = d < 10 ? '0' + d : (upper ? 'A' + d - 10 : 'a' + d - 10);
+        n /= base;
     }
-    while (i > 0) {
-        print_char(buf[--i]);
-    }
+    while (i) print_c(buf[--i]);
 }
 
-void print_ulong(unsigned long n) {
-    if (n == 0) {
-        print_char('0');
-        return;
-    }
-    char buf[32];
-    int i = 0;
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    while (i > 0) {
-        print_char(buf[--i]);
-    }
+void print_d(int n) {
+    if (n < 0) { print_c('-'); n = -n; }
+    print_num(n, 10, 0);
 }
 
-void print_hex(unsigned long n, int uppercase) {
-    if (n == 0) {
-        print_str("0x0");
-        return;
-    }
-    print_str(uppercase ? "0X" : "0x");
-    char buf[32];
-    int i = 0;
-    while (n > 0) {
-        int d = n % 16;
-        buf[i++] = d < 10 ? ('0' + d) : (uppercase ? ('A' + d - 10) : ('a' + d - 10));
-        n /= 16;
-    }
-    while (i > 0) {
-        print_char(buf[--i]);
-    }
+void print_ld(long n) {
+    if (n < 0) { print_c('-'); n = -n; }
+    print_num(n, 10, 0);
 }
 
-void print_float(double f) {
-    if (f < 0) {
-        print_char('-');
-        f = -f;
-    }
+void print_lld(long long n) {
+    if (n < 0) { print_c('-'); n = -n; }
+    print_num(n, 10, 0);
+}
+
+void print_f(double f) {
+    if (f < 0) { print_c('-'); f = -f; }
     long ip = (long)f;
-    double fp = f - (double)ip;
-    print_long(ip);
-    print_char('.');
+    print_num(ip, 10, 0);
+    print_c('.');
     for (int i = 0; i < 6; i++) {
-        fp *= 10;
-        int d = (int)fp;
-        print_char('0' + d);
-        fp -= d;
+        f *= 10;
+        print_c('0' + (int)f);
+        f -= (int)f;
     }
 }
 
 void printd(const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    
+    va_list a;
+    va_start(a, fmt);
     while (*fmt) {
         if (*fmt == '%') {
             fmt++;
             char c = *fmt;
             if (c == 'l') {
                 char c2 = *(fmt + 1);
-                if (c2 == 'l' && *(fmt + 2) == 'd') {
-                    print_long(va_arg(args, long long));
-                    fmt += 2;
-                } else if (c2 == 'd') {
-                    print_long(va_arg(args, long));
-                    fmt++;
-                }
-            } else if (c == 'd') {
-                print_int(va_arg(args, int));
-            } else if (c == 'u') {
-                print_ulong(va_arg(args, unsigned int));
-            } else if (c == 'x') {
-                print_hex(va_arg(args, unsigned int), 0);
-            } else if (c == 'X') {
-                print_hex(va_arg(args, unsigned int), 1);
-            } else if (c == 's') {
-                print_str(va_arg(args, char*));
-            } else if (c == 'c') {
-                print_char((char)va_arg(args, int));
-            } else if (c == 'f') {
-                print_float(va_arg(args, double));
-            } else if (c == '%') {
-                print_char('%');
-            } else {
-                print_char('%');
-                print_char(c);
-            }
-        } else {
-            print_char(*fmt);
-        }
+                if (c2 == 'l' && *(fmt + 2) == 'd') { print_lld(va_arg(a, long long)); fmt += 2; }
+                else if (c2 == 'd') { print_ld(va_arg(a, long)); fmt++; }
+                else if (c2 == 'u') { print_num(va_arg(a, unsigned long), 10, 0); fmt++; }
+            } else if (c == 'd' || c == 'i') { print_d(va_arg(a, int)); }
+            else if (c == 'u') { print_num(va_arg(a, unsigned int), 10, 0); }
+            else if (c == 'o') { print_num(va_arg(a, unsigned int), 8, 0); }
+            else if (c == 'x') { print_num(va_arg(a, unsigned int), 16, 0); }
+            else if (c == 'X') { print_num(va_arg(a, unsigned int), 16, 1); }
+            else if (c == 'p') { print_num((unsigned long)va_arg(a, void*), 16, 0); }
+            else if (c == 's') { print_s(va_arg(a, char*)); }
+            else if (c == 'c') { print_c((char)va_arg(a, int)); }
+            else if (c == 'f') { print_f(va_arg(a, double)); }
+            else if (c == '%') { print_c('%'); }
+            else { print_c('%'); print_c(c); }
+        } else { print_c(*fmt); }
         fmt++;
     }
-    
-    va_end(args);
+    va_end(a);
 }

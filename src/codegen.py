@@ -389,11 +389,7 @@ class CodeGen:
             if source.startswith("<") and source.endswith(">"):
                 # Treat <lib> as a plib lookup, not a system header
                 lib_name = source[1:-1]
-                # For <plstd>, look for plstd/printd.plib
-                if lib_name == "plstd":
-                    actual_path = "plstd/printd"
-                else:
-                    actual_path = f"plstd/{lib_name}"
+                actual_path = f"plstd/{lib_name}"
 
                 if lib_name not in seen_libs:
                     local_imports.append(actual_path)
