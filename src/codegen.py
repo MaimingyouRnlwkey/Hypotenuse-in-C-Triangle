@@ -463,25 +463,24 @@ class CodeGen:
             # Handle @ syntax: expose printd@plstd exposes a specific item from a library
             if "@" in exp_target:
                 func_name, lib_name = exp_target.rsplit("@", 1)
-                # Check if the library was imported AND the specific function was imported
+                # Check if the library was imported
                 lib_imported = any(
                     (imp.source == lib_name)
                     or (imp.source == f"<{lib_name}>")
                     or (imp.source == f'"{lib_name}"')
                     for imp in imports
                 )
+                # Also check if specific function was imported (using printd from <plstd>)
                 func_imported = any(imp.item == func_name for imp in imports)
-                if not lib_imported:
+                # Either library imported OR specific function imported is fine
+                if not lib_imported and not func_imported:
                     raise ValueError(
                         f"Cannot expose '{exp.target}' - library must be imported first. "
-                        f"Use: using {func_name} from <{lib_name}> before exposing it."
-                    )
-                if not func_imported:
-                    raise ValueError(
-                        f"Cannot expose '{exp.target}' - function must be imported first. "
-                        f"Use: using {func_name} from <{lib_name}> before exposing it."
+                        f"Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it."
                     )
                 # Track that this library is now exposed
+                if lib_name == "plstd":
+                    self._plstd_exposed = True
                 self._exposed_libs.add(lib_name)
                 self._exposed_libs.add(exp.target)
                 continue
