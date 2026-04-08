@@ -27,7 +27,6 @@
 - **src/** – Python source (`lexer.py`, `parser.py`, `structure.py`, `codegen.py`, `optimizer.py`, `struct_layout.py`, `error_msgs.py`, `main.py`).
 - **test/** – `.ctri` fixtures and integration checks.
 - **docs/** – Markdown documentation.
-- **scripts/** – Build scripts (e.g., `generate_error_msgs.py`).
 - **Makefile** – Orchestrates build, lint, and test steps.
 
 #### 🧩 Imports
@@ -72,7 +71,7 @@
 
 - The CLI catches exceptions, prints a concise message to `stderr`, and exits with a non‑zero status.
 - Prefer specific exception catches; avoid bare `except:`.
-- Error messages are loaded from `src/errors.txt` and embedded in the built binary via `scripts/generate_error_msgs.py`.
+- Error messages are loaded from `src/errors.txt` and embedded in `src/error_msgs.py`.
 - Use `error_msgs.get_error(code)` to retrieve error messages (see `src/error_msgs.py`).
 
 #### 🧪 Testing Philosophy
