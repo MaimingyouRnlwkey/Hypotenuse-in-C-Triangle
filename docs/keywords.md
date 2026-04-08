@@ -10,34 +10,34 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 
 ## Type Keywords
 
-| Keyword    | Description                      |
-| ---------- | -------------------------------- |
-| `int`      | Signed integer                   |
-| `char`     | Single character / byte          |
-| `float`    | Single-precision float           |
-| `double`   | Double-precision float           |
-| `void`     | No type / no return              |
-| `short`    | Short integer                    |
-| `long`     | Long integer                     |
-| `signed`   | Explicitly signed integer        |
-| `unsigned` | Unsigned integer                 |
-| `string`   | _future_ First-class string type |
-| `auto`     | _future_ Dynamic / inferred type |
-| `dynam`    | _future_ Dynamic array            |
+| Keyword    | Description                         |
+| ---------- | ----------------------------------- |
+| `int`      | Signed integer                      |
+| `char`     | Single character / byte             |
+| `float`    | Single-precision float              |
+| `double`   | Double-precision float              |
+| `void`     | No type / no return                 |
+| `short`    | Short integer                       |
+| `long`     | Long integer                        |
+| `signed`   | Explicitly signed integer           |
+| `unsigned` | Unsigned integer                    |
+| `string`   | _future_ First-class string type    |
+| `auto`     | _future_ Dynamic / inferred type    |
+| `dynam`    | _future_ Dynamic array              |
 | `tuple`    | _future_ Dynamic heterogeneous list |
 
 ---
 
 ## Structure Keywords
 
-| Keyword   | Description                         |
-| --------- | ----------------------------------- |
-| `struct`  | Plain struct (no inheritance)       |
-| `space`   | _NEW_ Library namespace declaration |
+| Keyword   | Description                              |
+| --------- | ---------------------------------------- |
+| `struct`  | Plain struct (no inheritance)            |
+| `space`   | _NEW_ Library namespace declaration      |
 | `typed`   | _future_ Typed struct (with inheritance) |
-| `typedef` | C11 type alias                      |
-| `union`   | C11 union                           |
-| `enum`    | C11 enumeration                     |
+| `typedef` | C11 type alias                           |
+| `union`   | C11 union                                |
+| `enum`    | C11 enumeration                          |
 
 ---
 
@@ -47,7 +47,7 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | ----------------------------- | ------------------------ |
 | `if` / `else`                 | Conditional branching    |
 | `while`                       | While loop               |
-| `for`                         | For loop                |
+| `for`                         | For loop                 |
 | `do`                          | Do-while loop            |
 | `switch` / `case` / `default` | Switch statement         |
 | `break`                       | Break out of loop/switch |
@@ -72,8 +72,8 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | Keyword     | Description                               |
 | ----------- | ----------------------------------------- |
 | `using`     | _NEW_ Import a symbol from a library      |
-| `expose`    | _NEW_ Globalize a library or namespace   |
-| `lib@`      | _NEW_ Explicit plstd access prefix         |
+| `expose`    | _NEW_ Globalize a library or namespace    |
+| `lib@`      | _NEW_ Explicit plstd access prefix        |
 | `overwrite` | overwrite base syntax with library syntax |
 
 ---
@@ -83,7 +83,7 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | Keyword    | Description                                 |
 | ---------- | ------------------------------------------- |
 | `asm`      | _NEW_ Inline assembly block                 |
-| `lamb`     | _future_ Named lambda                      |
+| `lamb`     | _future_ Named lambda                       |
 | `self`     | _NEW_ Optional struct self-reference        |
 | `init`     | _NEW_ Struct constructor lifecycle function |
 | `end`      | _NEW_ Struct destructor lifecycle function  |
