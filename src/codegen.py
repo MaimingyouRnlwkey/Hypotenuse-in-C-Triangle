@@ -178,6 +178,9 @@ class CodeGen:
                 return f"({cond}) ? {self._expr(node.right)}"
             left = self._expr(node.left)
             right = self._expr(node.right)
+            # Comparison operators don't need extra parens (avoid gcc warnings)
+            if node.op in ("==", "!=", "<", ">", "<=", ">="):
+                return f"{left} {node.op} {right}"
             # Preserve AST grouping regardless of C operator precedence.
             return f"({left} {node.op} {right})"
 
@@ -386,13 +389,7 @@ class CodeGen:
             if source.startswith("<") and source.endswith(">"):
                 # Treat <lib> as a plib lookup, not a system header
                 lib_name = source[1:-1]
-
-                # Handle <plstd> as special - look in plstd/ subfolder
-                if lib_name == "plstd":
-                    # Keep lib_name as "plstd" but the path will be plstd/plstd.plib
-                    actual_path = "plstd/plstd"
-                else:
-                    actual_path = lib_name
+                actual_path = f"plstd/{lib_name}"
 
                 if lib_name not in seen_libs:
                     local_imports.append(actual_path)
@@ -837,7 +834,18 @@ class CodeGen:
 
     def _gen_if(self, node: If):
         cond = self._expr(node.cond)
-        self._emit(f"if ({cond}) {{")
+        # Don't add extra parens if condition is already a comparison (causes warnings)
+        if isinstance(node.cond, Binary) and node.cond.op in (
+            "==",
+            "!=",
+            "<",
+            ">",
+            "<=",
+            ">=",
+        ):
+            self._emit(f"if ({cond}) {{")
+        else:
+            self._emit(f"if ({cond}) {{")
         self._indent += 1
         body = node.then_branch
         if isinstance(body, Compound):

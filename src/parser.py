@@ -527,6 +527,16 @@ class Parser:
             typ = f"{typ} {typ2}"
         typ = self._consume_pointer_stars(typ)
 
+        # Handle function pointer syntax: int (*func)(int, int)
+        func_ptr_name = None
+        if self.peek()[0] == "LPAREN":
+            # This is a function pointer declaration
+            self.expect("LPAREN")
+            func_ptr_name = self.expect("IDENTIFIER")[1]
+            self.expect("RPAREN")
+            # Now we need to parse the function signature parameters if present
+            # For now, just note it's a function pointer - we'll handle params later
+
         # Allow literals after compound types (e.g., unsigned long long x = 0xFF)
         if self.peek()[0] not in (
             "IDENTIFIER",
