@@ -138,8 +138,8 @@ full-install: build
 		echo "Installed to /usr/local/bin/hypotenuse"; \
 		sudo mkdir -p /usr/lib/PLIBS; \
 		echo "Created /usr/lib/PLIBS for libraries"; \
-		sudo cp -r plstd /usr/lib/PLIBS/; \
-		echo "Copied plstd to /usr/lib/PLIBS/plstd"; \
+		sudo cp -r plstd/* /usr/lib/PLIBS/; \
+		echo "Copied plstd files to /usr/lib/PLIBS/"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
@@ -147,8 +147,8 @@ full-install: build
 		echo "Installed to ~/.local/bin/hypotenuse"; \
 		mkdir -p ~/.local/lib/PLIBS; \
 		echo "Created ~/.local/lib/PLIBS for libraries"; \
-		cp -r plstd ~/.local/lib/PLIBS/; \
-		echo "Copied plstd to ~/.local/lib/PLIBS/plstd"; \
+		cp -r plstd/* ~/.local/lib/PLIBS/; \
+		echo "Copied plstd files to ~/.local/lib/PLIBS/"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 
