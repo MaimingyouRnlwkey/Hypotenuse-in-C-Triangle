@@ -266,14 +266,15 @@ class CodeGen:
                     else:
                         callee = lib_name + "_" + func_name
 
-            # Handle user namespace prefix like "helper@mylib" -> "helper_mylib"
+            # Handle user namespace prefix like "helper@mylib" -> "mylib_helper"
             # Check AFTER specific imports since both may contain "@"
             elif "@" in callee and "@lib" not in callee:
                 # Convert user namespace access to prefixed function name
+                # Space generates: namespace_func, so call should be namespace_func
                 parts = callee.split("@")
                 if len(parts) == 2:
                     func, namespace = parts
-                    callee = f"{func}_{namespace}"
+                    callee = f"{namespace}_{func}"
             # Handle plstd namespace prefix like "printd@lib" -> "plstd_printd"
             # (only if not handled by specific imports above)
             elif "@lib" in callee:
@@ -458,6 +459,33 @@ class CodeGen:
             # Check if the library was imported first
             # Normalize: both <plstd> and "plstd" should match "plstd"
             exp_target = exp.target
+
+            # Handle @ syntax: expose printd@plstd exposes a specific item from a library
+            if "@" in exp_target:
+                func_name, lib_name = exp_target.rsplit("@", 1)
+                # Check if the library was imported AND the specific function was imported
+                lib_imported = any(
+                    (imp.source == lib_name)
+                    or (imp.source == f"<{lib_name}>")
+                    or (imp.source == f'"{lib_name}"')
+                    for imp in imports
+                )
+                func_imported = any(imp.item == func_name for imp in imports)
+                if not lib_imported:
+                    raise ValueError(
+                        f"Cannot expose '{exp.target}' - library must be imported first. "
+                        f"Use: using {func_name} from <{lib_name}> before exposing it."
+                    )
+                if not func_imported:
+                    raise ValueError(
+                        f"Cannot expose '{exp.target}' - function must be imported first. "
+                        f"Use: using {func_name} from <{lib_name}> before exposing it."
+                    )
+                # Track that this library is now exposed
+                self._exposed_libs.add(lib_name)
+                self._exposed_libs.add(exp.target)
+                continue
+
             if exp_target.startswith("<") and exp_target.endswith(">"):
                 exp_target = exp_target[1:-1]
 

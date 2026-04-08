@@ -1007,11 +1007,20 @@ class Parser:
         return Call(callee=Var(f"lib~{symbol}"), args=args)
 
     def parse_expose(self) -> ExposeDecl:
-        """Parse an expose statement: expose namespace."""
+        """Parse an expose statement: expose namespace or expose func@namespace."""
         self.expect("EXPOSE")
         t = self.peek()
         if t[0] == "IDENTIFIER":
             target = self.advance()[1]
+            # Check for @ syntax like expose printd@plstd
+            if self.peek()[0] == "AT":
+                self.expect("AT")
+                # Can be IDENTIFIER or PLSTD for the namespace
+                if self.peek()[0] == "PLSTD":
+                    namespace = self.expect("PLSTD")[1]
+                else:
+                    namespace = self.expect("IDENTIFIER")[1]
+                target = f"{target}@{namespace}"
             self.expect("SEMICOLON")
             return ExposeDecl(target=target)
         elif t[0] == "PLSTD":
