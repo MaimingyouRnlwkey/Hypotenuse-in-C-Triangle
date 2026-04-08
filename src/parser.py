@@ -923,20 +923,29 @@ class Parser:
         t = self.peek()
 
         # Check for X& form (import from scoped, where X is any identifier like main, foo, etc.)
+        # Supports chained scopes: using a&b&c&symbol
         if t[0] == "IDENTIFIER":
             next_tok = (
                 self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
             )
             if next_tok and next_tok[0] == "AMPERSAND":
-                # This is a scoped import: using X&Y
-                scope_name = self.advance()[1]
-                self.expect("AMPERSAND")
-                symbol_name = self.expect("IDENTIFIER")[1]
+                # This is a scoped import: using X&Y or using a&b&c&Y
+                scope_parts = []
+                # Collect the first identifier
+                scope_parts.append(self.advance()[1])
+                # Loop through all ampersands
+                while self.peek()[0] == "AMPERSAND":
+                    self.expect("AMPERSAND")
+                    # Can be IDENTIFIER or another scope reference
+                    if self.peek()[0] == "IDENTIFIER":
+                        scope_parts.append(self.advance()[1])
+                    else:
+                        break
+                # Build source string from parts
+                source = "&".join(scope_parts)
                 alias = self._parse_optional_alias()
                 self.expect("SEMICOLON")
-                return UsingDecl(
-                    item=None, source=f"{scope_name}&{symbol_name}", alias=alias
-                )
+                return UsingDecl(item=None, source=source, alias=alias)
 
         # Check if we're importing a specific item (identifier before "from")
         if t[0] == "IDENTIFIER":

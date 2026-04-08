@@ -1,5 +1,7 @@
 """C11 code generator for C△ compiler."""
 
+import os
+
 from parser import (
     Function,
     Declaration,
@@ -64,6 +66,7 @@ class CodeGen:
         self._plstd_functions = set()  # Dynamically tracked plstd functions
         self._plstd_exposed = False  # Whether plstd has been exposed
         self._exposed_libs = set()  # Set of exposed library names
+        self._collected_includes = set()
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
@@ -239,17 +242,25 @@ class CodeGen:
             elif callee.startswith("lib~"):
                 callee = callee.replace("~", ":", 1)
             # Handle specific imports: using sin from <math> -> math_sin()
-            elif (
-                hasattr(self, "_specific_imports") and callee in self._specific_imports
-            ):
+            # AND intra-file scoped imports: using X&Y -> map Y to X_Y
+            if hasattr(self, "_specific_imports") and callee in self._specific_imports:
                 lib_name, generated_name = self._specific_imports[callee]
-                # Use the actual generated function name from plib processing
-                if generated_name:
-                    callee = generated_name
+                # Check if this is an intra-file scoped import (scope chain has &)
+                # OR it's a simple scoped import (single scope name without &)
+                # OR it's an alias (lib_name == generated_name means alias was used)
+                # Both need transformation: foo&bar -> foo_bar, main&helper -> main_helper
+                # But alias: use directly
+                if "&" in str(lib_name):
+                    # Chain like a&b&c - transform
+                    scope_chain = lib_name
+                    symbol = generated_name
+                    callee = scope_chain.replace("&", "_") + "_" + symbol
+                elif lib_name == generated_name:
+                    # Alias used - callee should already be the alias
+                    pass  # callee stays as-is (already matches)
                 else:
-                    # Fallback: construct from lib_name
-                    prefix = self._current_alias.get(lib_name, lib_name)
-                    callee = f"{prefix}_{callee}"
+                    # Single scope like foo - transform to foo_bar
+                    callee = lib_name + "_" + generated_name
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
@@ -299,7 +310,15 @@ class CodeGen:
     # ------------------------------------------------------------------
 
     def _gen_program(self, node):
+        # First collect all includes from user file and all plib dependencies
         self._gen_imports()
+        # Now emit collected includes at the very beginning (prepend)
+        includes_to_emit = []
+        for inc in sorted(self._collected_includes):
+            includes_to_emit.append(inc)
+        # Prepend includes before any existing code
+        self._lines = includes_to_emit + self._lines
+        # Now generate rest of code (plib functions included via _gen_plib_code)
         for decl in node.declarations:
             if isinstance(decl, SpaceDecl):
                 # Handle SpaceDecl in main file - generate nested declarations with prefix
@@ -311,21 +330,31 @@ class CodeGen:
                         nested.name = f"{prefix}_{nested.name}"
                     self._gen_node(nested)
             elif not isinstance(decl, (UsingDecl, ExposeDecl)):
-                # When structor is None, includes/defines were already handled in _gen_imports
-                if self.structor is None and isinstance(decl, (Include, Define)):
+                # Skip Include/Define - they were collected in _gen_imports via _collect_include
+                if isinstance(decl, (Include, Define)):
                     continue
                 self._gen_node(decl)
+
+    def _emit_collected_includes(self):
+        for inc in sorted(self._collected_includes):
+            self._emit(inc)
 
     def _gen_imports(self):
         """Generate import-related code (includes, exposes)."""
         if self.structor is None:
-            # No structor - just emit includes/defines from AST directly
             for decl in self.ast.declarations:
                 if isinstance(decl, Include):
-                    self._gen_include(decl)
+                    self._collect_include(decl)
                 elif isinstance(decl, Define):
-                    self._emit(decl.directive)
+                    self._collected_includes.add(decl.directive)
             return
+
+        # Collect user file includes from the AST
+        for decl in self.ast.declarations:
+            if isinstance(decl, Include):
+                self._collect_include(decl)
+            elif isinstance(decl, Define):
+                self._collected_includes.add(decl.directive)
 
         imports = self.structor.get_imports()
         exposes = self.structor.get_exposes()
@@ -357,7 +386,22 @@ class CodeGen:
                     # Track specific imports: using sin from <math>
                     specific_imports[imp.item] = actual_path
             elif "&" in source:
-                pass  # No include needed for scoped imports (X&Y)
+                # Handle intra-file scoped imports: using X&Y or using a&b&c&Y
+                # This imports a symbol Y from scope X (chain of scopes)
+                # We need to track this and map the symbol accordingly
+                parts = source.split("&")
+                if len(parts) >= 2:
+                    # Last part is the symbol being imported
+                    # First part(s) are the scope chain
+                    symbol_name = parts[-1]
+                    scope_chain = "&".join(parts[:-1])
+                    # If there's an alias, use it instead of scope chain
+                    if imp.alias:
+                        self._specific_imports[symbol_name] = (imp.alias, imp.alias)
+                    else:
+                        # Store for later mapping in _expr
+                        self._specific_imports[symbol_name] = (scope_chain, symbol_name)
+                pass
             else:
                 if source not in seen_libs:
                     local_imports.append(source)
@@ -369,8 +413,13 @@ class CodeGen:
 
         # Store for use in _expr
         # Map: bare_name -> (lib_name, namespace)
+        # Preserve any scoped imports already added (from & in source)
+        existing_scoped = dict(self._specific_imports)
         self._specific_imports = {}
         self._current_alias = {}
+        # Add scoped imports back
+        self._specific_imports.update(existing_scoped)
+        # Add specific imports from "using X from Y"
         for item, lib_name in specific_imports.items():
             # Will be updated when plib is processed
             self._specific_imports[item] = (lib_name, None)
@@ -383,6 +432,12 @@ class CodeGen:
                     break
             if alias:
                 self._current_alias[lib_name] = alias
+            # Only collect includes from plib (don't generate code yet)
+            self._collect_plib_includes(lib_name)
+
+        # Now generate plib code after all includes are collected
+        for lib_name in local_imports:
+            alias = self._current_alias.get(lib_name)
             self._gen_plib_code(lib_name, alias)
 
         for exp in exposes:
@@ -422,36 +477,31 @@ class CodeGen:
         old_generating = self._generating_plib
         self._generating_plib = True
 
-        search_dirs = []
-        if self.source_path:
-            search_dirs.append(os.path.dirname(self.source_path))
-
-        # Handle path with folder: plstd/printd -> look in plstd/ subfolder
-        if "/" in lib_name:
-            folder, filename = lib_name.split("/", 1)
-            search_dirs.extend(
-                [
-                    os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
-                    f"/usr/lib/PLIBS/{folder}",
-                ]
-            )
-        else:
-            search_dirs.extend(
-                [
-                    ".",
-                    os.path.expanduser("~/.local/lib/PLIBS"),
-                    "/usr/lib/PLIBS",
-                ]
-            )
-
         plib_path = None
-        # Extract just the filename for the plib search
         search_name = lib_name.split("/")[-1]
-        for d in search_dirs:
-            candidate = os.path.join(d, f"{search_name}.plib")
-            if os.path.exists(candidate):
-                plib_path = candidate
-                break
+
+        # Always check current directory first
+        current_dir = os.path.dirname(self.source_path) if self.source_path else "."
+        search_paths = [current_dir] + self._get_plibs_search_dirs()
+
+        # Handle path with folder: plstd/printd -> look in folder subdirectory
+        if "/" in lib_name:
+            folder = lib_name.split("/")[0]
+            for base in search_paths:
+                folder_path = os.path.join(base, folder)
+                if os.path.isdir(folder_path):
+                    for f in os.listdir(folder_path):
+                        if f.endswith(".plib"):
+                            plib_path = os.path.join(folder_path, f)
+                            break
+                    if plib_path:
+                        break
+        else:
+            for base in search_paths:
+                candidate = os.path.join(base, f"{search_name}.plib")
+                if os.path.exists(candidate):
+                    plib_path = candidate
+                    break
 
         if not plib_path:
             return
@@ -463,12 +513,13 @@ class CodeGen:
         tokens.append(("EOF", "EOF", 0, 0))
         plib_ast = p.Parser(tokens).parse_program()
 
-        # First, emit all includes from the plib at the top
+        # Collect all includes from the plib (not emit - collected for later)
         for decl in plib_ast.declarations:
             if isinstance(decl, p.Include):
-                self._gen_include(decl)
+                self._collect_include(decl)
             elif isinstance(decl, p.Define):
-                self._emit(decl.directive)
+                # Collect defines into a set too for later deduplication
+                self._collected_includes.add(decl.directive)
 
         # Determine the prefix to use - alias if provided, else lib_name
         # For plstd/plstd, use no prefix (empty string)
@@ -532,6 +583,86 @@ class CodeGen:
         # Restore the flag after generating plib code
         self._generating_plib = old_generating
 
+    def _get_plibs_search_dirs(self):
+        """Return list of directories to search for plib files."""
+        return [
+            os.path.expanduser("~/.local/lib/PLIBS"),
+            "/usr/lib/PLIBS",
+        ]
+
+    def _collect_plib_includes(self, lib_name: str, alias: str = None):
+        """Collect includes from a plib file into self._collected_includes."""
+        import os
+        import lexer
+        import parser as p
+
+        search_dirs = []
+        if self.source_path:
+            search_dirs.append(os.path.dirname(self.source_path))
+
+        if "/" in lib_name:
+            folder, filename = lib_name.split("/", 1)
+            search_dirs.extend(
+                [
+                    os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
+                    f"/usr/lib/PLIBS/{folder}",
+                ]
+            )
+        else:
+            search_dirs.extend(
+                [
+                    ".",
+                    os.path.expanduser("~/.local/lib/PLIBS"),
+                    "/usr/lib/PLIBS",
+                ]
+            )
+
+        plib_path = None
+        search_name = lib_name.split("/")[-1]
+
+        # For paths like "folder/name" (e.g., "plstd/plstd"), look in folder subdirectory
+        if "/" in lib_name:
+            folder = lib_name.split("/")[0]
+            for base in ["."] + self._get_plibs_search_dirs():
+                folder_path = os.path.join(base, folder)
+                if os.path.isdir(folder_path):
+                    # Find any .plib file in the folder
+                    for f in os.listdir(folder_path):
+                        if f.endswith(".plib"):
+                            plib_path = os.path.join(folder_path, f)
+                            break
+                    if plib_path:
+                        break
+
+        if not plib_path:
+            # Standard search
+            for d in self._get_plibs_search_dirs():
+                candidate = os.path.join(d, f"{search_name}.plib")
+                if os.path.exists(candidate):
+                    plib_path = candidate
+                    break
+
+        if not plib_path:
+            return
+
+        self._do_collect_plib_includes(plib_path)
+
+    def _do_collect_plib_includes(self, plib_path: str):
+        """Actually parse plib and collect its includes."""
+        import lexer
+        import parser as p
+
+        with open(plib_path, "r") as f:
+            plib_content = f.read()
+
+        tokens = lexer.Lexer(plib_content).lex()
+        tokens.append(("EOF", "EOF", 0, 0))
+        plib_ast = p.Parser(tokens).parse_program()
+
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Include):
+                self._collect_include(decl)
+
     # ------------------------------------------------------------------
     # Statement / declaration dispatcher
     # ------------------------------------------------------------------
@@ -567,7 +698,7 @@ class CodeGen:
         elif isinstance(node, ExprStmt):
             self._gen_expr_stmt(node)
         elif isinstance(node, Include):
-            self._gen_include(node)
+            self._collect_include(node)
         elif isinstance(node, Define):
             # Emit #define directives as-is
             self._emit(node.directive)
@@ -827,11 +958,11 @@ class CodeGen:
         if node.expr is not None:
             self._emit(f"{self._expr(node.expr)};")
 
-    def _gen_include(self, node: Include):
+    def _collect_include(self, node: Include):
         if node.is_system:
-            self._emit(f"#include <{node.path}>")
+            self._collected_includes.add(f"#include <{node.path}>")
         else:
-            self._emit(f'#include "{node.path}"')
+            self._collected_includes.add(f'#include "{node.path}"')
 
     def _gen_switch(self, node: Switch):
         expr = self._expr(node.expr)
