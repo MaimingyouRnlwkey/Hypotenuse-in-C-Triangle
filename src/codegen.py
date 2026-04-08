@@ -205,26 +205,22 @@ class CodeGen:
                 else self._expr(node.callee)
             )
 
-            # FIRST: Check if plstd is exposed
+            # FIRST: Check if library is exposed
             # If exposed: printd@lib prefix is allowed but optional (strip it)
             # If NOT exposed: printd@lib prefix IS required for plstd functions
             # Skip this check when generating plib code itself
-            if (
-                not self._generating_plib
-                and hasattr(self, "_plstd_exposed")
-                and self._plstd_exposed
-            ):
+            # Check both the plstd flag and exposed_libs set for backwards compatibility
+            plstd_exposed = (
+                hasattr(self, "_plstd_exposed") and self._plstd_exposed
+            ) or (hasattr(self, "_exposed_libs") and "plstd" in self._exposed_libs)
+            if not self._generating_plib and plstd_exposed:
                 # plstd is exposed - allow both direct call and printd@lib prefix
                 actual_callee = callee
                 if "@lib" in callee:
                     actual_callee = callee.split("@")[0]
                 if actual_callee in self._plstd_functions:
                     callee = actual_callee
-            elif (
-                not self._generating_plib
-                and hasattr(self, "_plstd_exposed")
-                and not self._plstd_exposed
-            ):
+            elif not self._generating_plib and not plstd_exposed:
                 # plstd not exposed - printd@lib prefix IS required for plstd functions
                 actual_callee = callee
                 if "@lib" in callee:
@@ -478,9 +474,7 @@ class CodeGen:
                         f"Cannot expose '{exp.target}' - library must be imported first. "
                         f"Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it."
                     )
-                # Track that this library is now exposed
-                if lib_name == "plstd":
-                    self._plstd_exposed = True
+                # Track that this library is now exposed (using generic set)
                 self._exposed_libs.add(lib_name)
                 self._exposed_libs.add(exp.target)
                 continue
