@@ -203,18 +203,18 @@ class CodeGen:
             )
 
             # FIRST: Check if plstd is exposed
-            # If exposed: lib~ prefix is allowed but optional (strip it)
-            # If NOT exposed: lib~ prefix IS required for plstd functions
+            # If exposed: printd@lib prefix is allowed but optional (strip it)
+            # If NOT exposed: printd@lib prefix IS required for plstd functions
             # Skip this check when generating plib code itself
             if (
                 not self._generating_plib
                 and hasattr(self, "_plstd_exposed")
                 and self._plstd_exposed
             ):
-                # plstd is exposed - allow both direct call and lib~ prefix
+                # plstd is exposed - allow both direct call and printd@lib prefix
                 actual_callee = callee
-                if callee.startswith("lib~"):
-                    actual_callee = callee[4:]
+                if "@lib" in callee:
+                    actual_callee = callee.split("@")[0]
                 if actual_callee in self._plstd_functions:
                     callee = actual_callee
             elif (
@@ -222,45 +222,62 @@ class CodeGen:
                 and hasattr(self, "_plstd_exposed")
                 and not self._plstd_exposed
             ):
-                # plstd not exposed - lib~ prefix IS required for plstd functions
+                # plstd not exposed - printd@lib prefix IS required for plstd functions
                 actual_callee = callee
-                if callee.startswith("lib~"):
-                    actual_callee = callee[4:]
+                if "@lib" in callee:
+                    actual_callee = callee.split("@")[0]
                 if actual_callee in self._plstd_functions:
-                    if not callee.startswith("lib~"):
+                    if "@lib" not in callee:
                         raise ValueError(
-                            f"Function '{actual_callee}' requires 'lib~{actual_callee}()' syntax (plstd not exposed)."
+                            f"Function '{actual_callee}' requires '{actual_callee}@lib()' syntax (plstd not exposed)."
                         )
                     callee = actual_callee
 
-            # Handle user namespace prefix like "mylib~helper" -> "mylib_helper"
-            # Check BEFORE specific imports since both may contain "~"
-            if "~" in callee and not callee.startswith("lib~"):
-                # Convert user namespace access to prefixed function name
-                callee = callee.replace("~", "_")
-            # Handle plstd namespace prefix like "lib~func" -> "lib:func"
-            elif callee.startswith("lib~"):
-                callee = callee.replace("~", ":", 1)
             # Handle specific imports: using sin from <math> -> math_sin()
             # AND intra-file scoped imports: using X&Y -> map Y to X_Y
-            if hasattr(self, "_specific_imports") and callee in self._specific_imports:
-                lib_name, generated_name = self._specific_imports[callee]
+            # This must run BEFORE namespace transformation so "printd@lib" can match "printd"
+            base_callee = callee.split("@")[0] if "@" in callee else callee
+            if (
+                hasattr(self, "_specific_imports")
+                and base_callee in self._specific_imports
+            ):
+                lib_name, func_name = self._specific_imports[base_callee]
                 # Check if this is an intra-file scoped import (scope chain has &)
                 # OR it's a simple scoped import (single scope name without &)
-                # OR it's an alias (lib_name == generated_name means alias was used)
+                # OR it's an alias (lib_name == func_name means alias was used)
                 # Both need transformation: foo&bar -> foo_bar, main&helper -> main_helper
                 # But alias: use directly
                 if "&" in str(lib_name):
                     # Chain like a&b&c - transform
                     scope_chain = lib_name
-                    symbol = generated_name
-                    callee = scope_chain.replace("&", "_") + "_" + symbol
-                elif lib_name == generated_name:
+                    callee = scope_chain.replace("&", "_") + "_" + func_name
+                elif lib_name == func_name:
                     # Alias used - callee should already be the alias
                     pass  # callee stays as-is (already matches)
                 else:
                     # Single scope like foo - transform to foo_bar
-                    callee = lib_name + "_" + generated_name
+                    # OR plstd specific import: printd from <plstd> -> plstd_printd
+                    if lib_name == "plstd":
+                        # func_name is already the generated name like "plstd_printd"
+                        callee = func_name
+                    else:
+                        callee = lib_name + "_" + func_name
+
+            # Handle user namespace prefix like "helper@mylib" -> "helper_mylib"
+            # Check AFTER specific imports since both may contain "@"
+            elif "@" in callee and "@lib" not in callee:
+                # Convert user namespace access to prefixed function name
+                parts = callee.split("@")
+                if len(parts) == 2:
+                    func, namespace = parts
+                    callee = f"{func}_{namespace}"
+            # Handle plstd namespace prefix like "printd@lib" -> "plstd_printd"
+            # (only if not handled by specific imports above)
+            elif "@lib" in callee:
+                parts = callee.split("@")
+                if len(parts) == 2:
+                    func, namespace = parts
+                    callee = f"{namespace}_{func}"
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
@@ -522,11 +539,11 @@ class CodeGen:
                 self._collected_includes.add(decl.directive)
 
         # Determine the prefix to use - alias if provided, else lib_name
-        # For plstd/plstd, use no prefix (empty string)
+        # For plstd/plstd, use "plstd" as prefix to avoid name conflicts
         if alias:
             prefix = alias
         elif lib_name.startswith("plstd/"):
-            prefix = ""  # No prefix for plstd
+            prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
         else:
             prefix = lib_name
 
@@ -535,12 +552,13 @@ class CodeGen:
             if isinstance(decl, (p.Include, p.Define)):
                 continue
 
-            # Apply prefix to top-level declarations (if alias or plstd)
-            if alias or lib_name.startswith("plstd/"):
+            # Apply prefix to top-level declarations only if alias is provided
+            # For plstd imports without alias (using printd from <plstd>), don't prefix
+            if alias:
                 if isinstance(decl, p.Function):
-                    decl.name = f"{prefix}_{decl.name}" if prefix else decl.name
+                    decl.name = f"{prefix}_{decl.name}"
                 elif isinstance(decl, p.Declaration):
-                    decl.name = f"{prefix}_{decl.name}" if prefix else decl.name
+                    decl.name = f"{prefix}_{decl.name}"
 
             # Handle SpaceDecl - generate with prefix + namespace prefix
             if isinstance(decl, p.SpaceDecl):
@@ -554,11 +572,10 @@ class CodeGen:
                 for nested_decl in decl.declarations:
                     if isinstance(nested_decl, p.Function):
                         generated_name = f"{actual_prefix}_{nested_decl.name}"
-                        # Update mapping: sin -> math_sin
+                        # Update mapping: printd -> (plstd, plstd_printd)
                         if nested_decl.name in self._specific_imports:
-                            _, old_namespace = self._specific_imports[nested_decl.name]
                             self._specific_imports[nested_decl.name] = (
-                                lib_name,
+                                lib_name.split("/")[-1],
                                 generated_name,
                             )
 
@@ -571,8 +588,12 @@ class CodeGen:
             ):
                 # Update specific_imports mapping for this function
                 if isinstance(decl, p.Function) and decl.name in self._specific_imports:
-                    _, old_namespace = self._specific_imports[decl.name]
-                    self._specific_imports[decl.name] = (lib_name, decl.name)
+                    # The decl.name already has the prefix applied (see line ~558)
+                    # Just use it directly
+                    self._specific_imports[decl.name] = (
+                        lib_name.split("/")[-1],
+                        decl.name,
+                    )
 
                 # Track plstd functions if we're generating plstd
                 if lib_name.startswith("plstd/") and isinstance(decl, p.Function):

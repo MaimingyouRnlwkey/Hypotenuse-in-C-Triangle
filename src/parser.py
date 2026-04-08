@@ -2089,21 +2089,21 @@ class Parser:
                 # Convert arrow to (*expr).field for AST representation
                 deref = Unary(op="*", operand=node, prefix=True)
                 node = FieldAccess(deref, field_name)
-            elif self.peek()[0] == "TILDE":
-                # Namespace access: namespace~symbol
+            elif self.peek()[0] == "AT":
+                # Namespace access: namespace@symbol
                 # Only valid when node is a Var (identifier)
                 if not isinstance(node, Var):
                     break
                 self.advance()
-                if self.peek()[0] == "TILDE":
-                    # Handle ~~ (two tildes) for nested namespace
+                if self.peek()[0] == "AT":
+                    # Handle @@ (two ats) for nested namespace
                     self.advance()
                     symbol = self.expect("IDENTIFIER")[1]
-                    node = Var(f"{node.name}~~{symbol}")
+                    node = Var(f"{node.name}@@{symbol}")
                 else:
-                    # Single tilde - treat as namespace prefix
+                    # Single @ - treat as namespace prefix
                     symbol = self.expect("IDENTIFIER")[1]
-                    node = Var(f"{node.name}~{symbol}")
+                    node = Var(f"{node.name}@{symbol}")
             else:
                 break
         return node
@@ -2197,27 +2197,24 @@ class Parser:
         """Parse the most basic expression forms."""
         tok = self.peek()
 
-        # Handle lib~symbol - explicit plstd access
-        if tok[0] == "LIB":
-            self.expect("LIB")
-            self.expect("TILDE")
-            if self.peek()[0] == "IDENTIFIER":
-                symbol = self.advance()[1]
-                # Check for method call like lib~printd(...)
-                if self.peek()[0] == "LPAREN":
-                    return self._parse_lib_call(symbol)
-                return LibAccess(symbol=symbol)
-            line = tok[2] if len(tok) > 2 else 0
-            col = tok[3] if len(tok) > 3 else 0
-            raise SyntaxError(
-                error_msgs.get_error_msg(
-                    "E001",
-                    found="lib~",
-                    line=line,
-                    col=col,
-                    fallback=f"Expected symbol after lib~ at line {line}, column {col}",
-                )
+        # Handle printd@lib - namespace access (function@namespace)
+        if tok[0] == "IDENTIFIER":
+            # Check if this is followed by @
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
             )
+            if next_tok and next_tok[0] == "AT":
+                # This is function@namespace pattern
+                func_name = self.advance()[1]
+                self.expect("AT")
+                # Namespace can be IDENTIFIER or LIB (for lib)
+                if self.peek()[0] == "IDENTIFIER":
+                    namespace = self.advance()[1]
+                elif self.peek()[0] == "LIB":
+                    namespace = self.advance()[1]
+                else:
+                    namespace = self.expect("IDENTIFIER")[1]
+                return Var(f"{func_name}@{namespace}")
 
         if tok[0] == "IDENTIFIER":
             return Var(self.advance()[1])
