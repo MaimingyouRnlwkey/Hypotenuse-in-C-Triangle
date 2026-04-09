@@ -459,12 +459,20 @@ class CodeGen:
             # Handle @ syntax: expose printd@plstd exposes a specific item from a library
             if "@" in exp_target:
                 func_name, lib_name = exp_target.rsplit("@", 1)
-                # Check if the library was imported
+
+                # Special case: "lib" is an alias for "plstd"
+                # So expose printd@lib should work if <plstd> was imported
+                check_libs = [lib_name]
+                if lib_name == "lib":
+                    check_libs.append("plstd")
+
+                # Check if any of the potential libraries was imported
                 lib_imported = any(
-                    (imp.source == lib_name)
-                    or (imp.source == f"<{lib_name}>")
-                    or (imp.source == f'"{lib_name}"')
+                    (imp.source == l)
+                    or (imp.source == f"<{l}>")
+                    or (imp.source == f'"{l}"')
                     for imp in imports
+                    for l in check_libs
                 )
                 # Also check if specific function was imported (using printd from <plstd>)
                 func_imported = any(imp.item == func_name for imp in imports)
@@ -475,6 +483,9 @@ class CodeGen:
                         f"Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it."
                     )
                 # Track that this library is now exposed (using generic set)
+                # Special case: "lib" is an alias for "plstd"
+                if lib_name == "lib":
+                    self._plstd_exposed = True
                 self._exposed_libs.add(lib_name)
                 self._exposed_libs.add(exp.target)
                 continue
@@ -564,6 +575,14 @@ class CodeGen:
             prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
         else:
             prefix = lib_name
+
+        # Auto-expose path-based imports like <plstd/printd>
+        # This is equivalent to "expose <plstd>" - makes functions accessible without @lib suffix
+        if "/" in lib_name:
+            folder = lib_name.split("/")[0]
+            if folder == "plstd":
+                self._plstd_exposed = True
+            self._exposed_libs.add(folder)
 
         for decl in plib_ast.declarations:
             # Skip includes/defines - already handled above

@@ -962,7 +962,7 @@ class Parser:
         )
 
     def _parse_import_source(self) -> str:
-        """Parse the source of an import: <lib> or "path"."""
+        """Parse the source of an import: <lib> or <lib/sublib> or "path"."""
         t = self.peek()
         if t[0] == "LT":
             self.expect("LT")
@@ -971,6 +971,15 @@ class Parser:
                 lib_name = self.expect("PLSTD")[1]
             else:
                 lib_name = self.expect("IDENTIFIER")[1]
+
+            # Handle path-like imports: <plstd/printd>
+            while self.peek()[0] == "DIVIDE":
+                self.expect("DIVIDE")
+                if self.peek()[0] == "PLSTD":
+                    lib_name += "/" + self.expect("PLSTD")[1]
+                else:
+                    lib_name += "/" + self.expect("IDENTIFIER")[1]
+
             self.expect("GT")
             return f"<{lib_name}>"
         elif t[0] == "STRING_LITERAL":
@@ -1012,12 +1021,12 @@ class Parser:
         t = self.peek()
         if t[0] == "IDENTIFIER":
             target = self.advance()[1]
-            # Check for @ syntax like expose printd@plstd
+            # Check for @ syntax like expose printd@plstd or expose printd@lib
             if self.peek()[0] == "AT":
                 self.expect("AT")
-                # Can be IDENTIFIER or PLSTD for the namespace
-                if self.peek()[0] == "PLSTD":
-                    namespace = self.expect("PLSTD")[1]
+                # Can be IDENTIFIER, PLSTD, or LIB for the namespace
+                if self.peek()[0] in ("PLSTD", "LIB"):
+                    namespace = self.advance()[1]
                 else:
                     namespace = self.expect("IDENTIFIER")[1]
                 target = f"{target}@{namespace}"
