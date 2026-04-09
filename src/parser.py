@@ -554,19 +554,18 @@ class Parser:
 
         array_size = None
         if self.accept("LBRACKET"):
-            if self.peek()[0] == "INT_LITERAL":
+            # Support empty dimension: int arr[] = {1,2,3} - size inferred from init
+            if self.peek()[0] == "RBRACKET":
+                # Empty dimension - will infer from initializer later
+                self.expect("RBRACKET")
+            elif self.peek()[0] == "INT_LITERAL":
                 array_size = int(self.advance()[1])
+                self.expect("RBRACKET")
             elif self.peek()[0] == "IDENTIFIER":
                 array_size = self.advance()[1]
-            self.expect("RBRACKET")
-
-        init = None
-        if self.accept("ASSIGN"):
-            init = self.parse_assignment()
-        elif self.peek()[0] == "LBRACE":
-            init = self.parse_init_list()
-
-        decls = [Declaration(typ, name, init, array_size)]
+                self.expect("RBRACKET")
+            else:
+                self.expect("RBRACKET")
 
         init = None
         if self.accept("ASSIGN"):

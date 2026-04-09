@@ -871,6 +871,14 @@ class CodeGen:
 
         if array_size is not None:
             name = f"{node.name}[{array_size}]"
+        elif node.initializer is not None and isinstance(node.initializer, InitList):
+            # Empty dimension with initializer - use element count as size
+            count = len(node.initializer.elements) if node.initializer.elements else 0
+            if count > 0:
+                name = f"{node.name}[{count}]"
+            else:
+                name = node.name
+
         if node.initializer is not None:
             val = self._expr(node.initializer)
             self._emit(f"{typ} {name} = {val};")
