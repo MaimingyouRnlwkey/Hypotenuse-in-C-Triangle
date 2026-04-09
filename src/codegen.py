@@ -868,36 +868,78 @@ class CodeGen:
                 self._emit(f"{actual_type} {name}(void);")
             return
 
-        # Check for multi-dimensional arrays
+        # Collect dimensions from both array_size and dimensions
         dims = getattr(node, "dimensions", None)
-        if dims and isinstance(dims, list) and len(dims) > 1:
-            # Full multi-dimensional: int arr[2][3]
-            dim_str = "".join(f"[{d}]" for d in dims if d)
-            name = f"{node.name}{dim_str}"
-        elif dims and isinstance(dims, list) and len(dims) == 1:
-            # Single dim stored in dimensions: use it
-            name = f"{node.name}[{dims[0]}]"
+
+        # Build full dimension list: use array_size for 1D, dimensions for multi-dim
+        dim_list = []
+
+        # Build full dimension list from array_size and/or dimensions
+        if dims and isinstance(dims, list):
+            # Use dimensions list directly (contains all dims)
+            dim_list = list(dims)
         elif array_size is not None:
-            name = f"{node.name}[{array_size}]"
+            # Single dimension from array_size
+            if isinstance(array_size, list):
+                dim_list = list(array_size)
+            else:
+                dim_list = [array_size]
 
-        # If still no name set, use node.name
-        if "name" not in dir() or not name:
-            name = node.name
+        # If we have None in any position, try to infer from initializer
+        init = node.initializer
 
+        def count_elements_at_depth(init_list, depth):
+            """Count elements at given nesting depth."""
+            if depth < 0 or not init_list or not hasattr(init_list, "elements"):
+                return 0
+            if depth == 0:
+                return len(init_list.elements) if init_list.elements else 0
+            # Go deeper: use first element at each level
+            if init_list.elements and init_list.elements[0]:
+                return count_elements_at_depth(init_list.elements[0], depth - 1)
+            return 0
+
+        # Process each dimension position
+        for i, d in enumerate(dim_list):
+            if d is None:
+                if init:
+                    # Try to infer from initializer at this depth
+                    inferred = count_elements_at_depth(init, i)
+                    if inferred > 0:
+                        dim_list[i] = inferred
+                    else:
+                        raise ValueError(
+                            f"Cannot infer dimension {i + 1} for array '{node.name}' - "
+                            f"provide explicit size or ensure initializer has values at this level"
+                        )
+                else:
+                    raise ValueError(
+                        f"Cannot infer dimension {i + 1} for array '{node.name}' - "
+                        f"provide explicit size or initializer"
+                    )
+
+        # Build final name with all dimensions
+        def is_valid_dim(d):
+            if d is None:
+                return False
+            if isinstance(d, list):
+                return any(is_valid_dim(x) for x in d)
+            return isinstance(d, int) and d > 0
+
+        dim_str = ""
+        for d in dim_list:
+            if d is None:
+                continue
+            if isinstance(d, list):
+                dim_str += "".join(f"[{x}]" for x in d if x and isinstance(x, int))
+            elif isinstance(d, int) and d > 0:
+                dim_str += f"[{d}]"
+        if dim_str:
+            name = f"{node.name}{dim_str}"
+
+        # Emit the declaration
         if node.initializer is not None:
             val = self._expr(node.initializer)
-            # For nested init lists, count top-level elements for missing first dim
-            if isinstance(node.initializer, InitList) and dims:
-                # Count rows in initializer
-                elem_count = (
-                    len(node.initializer.elements) if node.initializer.elements else 0
-                )
-                # Build full dimension string, inferring missing dims
-                full_dims = list(dims) if dims else []
-                if full_dims and full_dims[0] is None and elem_count > 0:
-                    full_dims[0] = elem_count
-                    dim_str = "".join(f"[{d}]" for d in full_dims if d)
-                    name = f"{node.name}{dim_str}"
             self._emit(f"{typ} {name} = {val};")
         else:
             self._emit(f"{typ} {name};")

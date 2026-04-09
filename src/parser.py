@@ -572,8 +572,8 @@ class Parser:
 
         # Determine primary array size from first dimension
         array_size = dimensions[0] if dimensions else None
-        # Store all dimensions for codegen
-        full_dims = dimensions if len(dimensions) > 1 else None
+        # Store all dimensions for codegen (always keep for inference)
+        full_dims = dimensions if dimensions else None
 
         init = None
         if self.accept("ASSIGN"):
@@ -843,35 +843,46 @@ class Parser:
             array_size = None
             sizes = []
             while self.accept("LBRACKET"):
-                if self.peek()[0] == "INT_LITERAL":
+                if self.peek()[0] == "RBRACKET":
+                    # Empty dimension - mark as None for inference
+                    sizes.append(None)
+                    self.expect("RBRACKET")
+                elif self.peek()[0] == "INT_LITERAL":
                     sizes.append(int(self.advance()[1]))
+                    self.expect("RBRACKET")
                 elif self.peek()[0] == "IDENTIFIER":
-                    # Handle macro constants in array sizes (e.g., #define BUFF 1024)
+                    # Handle macro constants in array sizes
                     ident = self.advance()[1]
-                    # Try to resolve as a known macro or leave as identifier
-                    sizes.append(ident)  # Keep as string for later resolution
+                    sizes.append(ident)
+                    self.expect("RBRACKET")
                 else:
-                    sizes.append(0)  # flexible array
-                self.expect("RBRACKET")
+                    sizes.append(None)
+                    self.expect("RBRACKET")
             if len(sizes) > 0:
                 array_size = sizes[0] if len(sizes) == 1 else sizes
+                # Store full dimensions for inference
+                full_dims = sizes if len(sizes) > 1 else sizes
 
             init = self.parse_assignment() if self.accept("ASSIGN") else None
-            decls = [Declaration(typ, name, init, array_size)]
+            decls = [Declaration(typ, name, init, array_size, full_dims)]
             while self.accept("COMMA"):
                 extra_name = self.expect("IDENTIFIER")[1]
                 # Handle multi-dimensional array in comma-separated list
                 extra_sizes = []
                 while self.accept("LBRACKET"):
-                    if self.peek()[0] == "INT_LITERAL":
+                    if self.peek()[0] == "RBRACKET":
+                        extra_sizes.append(None)
+                        self.expect("RBRACKET")
+                    elif self.peek()[0] == "INT_LITERAL":
                         extra_sizes.append(int(self.advance()[1]))
+                        self.expect("RBRACKET")
                     elif self.peek()[0] == "IDENTIFIER":
-                        # Handle macro constants in array sizes
                         ident = self.advance()[1]
                         extra_sizes.append(ident)
+                        self.expect("RBRACKET")
                     else:
-                        extra_sizes.append(0)
-                    self.expect("RBRACKET")
+                        extra_sizes.append(None)
+                        self.expect("RBRACKET")
                 extra_array_size = (
                     extra_sizes[0]
                     if len(extra_sizes) == 1
@@ -879,8 +890,13 @@ class Parser:
                     if extra_sizes
                     else None
                 )
+                extra_full_dims = extra_sizes if extra_sizes else None
                 extra_init = self.parse_assignment() if self.accept("ASSIGN") else None
-                decls.append(Declaration(typ, extra_name, extra_init, extra_array_size))
+                decls.append(
+                    Declaration(
+                        typ, extra_name, extra_init, extra_array_size, extra_full_dims
+                    )
+                )
             self.expect("SEMICOLON")
             if len(decls) == 1:
                 return decls[0]
