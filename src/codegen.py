@@ -533,24 +533,38 @@ class CodeGen:
         current_dir = os.path.dirname(self.source_path) if self.source_path else "."
         search_paths = [current_dir] + self._get_plibs_search_dirs()
 
-        # Handle path with folder: plstd/printd -> look in folder subdirectory
+        # Handle path with folder: plstd/printd -> import first .plib in folder
         if "/" in lib_name:
             folder = lib_name.split("/")[0]
             for base in search_paths:
                 folder_path = os.path.join(base, folder)
                 if os.path.isdir(folder_path):
-                    for f in os.listdir(folder_path):
+                    for f in sorted(os.listdir(folder_path)):
                         if f.endswith(".plib"):
                             plib_path = os.path.join(folder_path, f)
                             break
                     if plib_path:
                         break
         else:
+            # First try direct .plib file
             for base in search_paths:
                 candidate = os.path.join(base, f"{search_name}.plib")
                 if os.path.exists(candidate):
                     plib_path = candidate
                     break
+
+            # If no .plib file found, try as folder (import all .plib files in folder)
+            if not plib_path:
+                for base in search_paths:
+                    folder_path = os.path.join(base, search_name)
+                    if os.path.isdir(folder_path):
+                        # Import first .plib in folder
+                        for f in sorted(os.listdir(folder_path)):
+                            if f.endswith(".plib"):
+                                plib_path = os.path.join(folder_path, f)
+                                break
+                        if plib_path:
+                            break
 
         if not plib_path:
             return
@@ -576,6 +590,11 @@ class CodeGen:
             prefix = alias
         elif lib_name.startswith("plstd/"):
             prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
+            self._plstd_exposed = True  # Auto-expose when importing via folder
+        elif "/" in lib_name:
+            # Any other folder import - extract folder name as prefix
+            prefix = lib_name.split("/")[0]
+            self._exposed_libs.add(prefix)
         else:
             prefix = lib_name
 
