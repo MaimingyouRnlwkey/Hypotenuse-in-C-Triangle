@@ -90,6 +90,7 @@ class Declaration(Node):
     array_size: Optional[int] = (
         None  # Optional array size for declarations like char temp[32]
     )
+    dimensions: Optional[List] = None  # For multi-dimensional arrays like int arr[2][3]
 
 
 @dataclass
@@ -552,20 +553,27 @@ class Parser:
             )
         name = self.expect("IDENTIFIER")[1]
 
-        array_size = None
-        if self.accept("LBRACKET"):
-            # Support empty dimension: int arr[] = {1,2,3} - size inferred from init
+        # Support multi-dimensional arrays: int arr[2][3], int arr[][3] = {{1,2,3}}
+        dimensions = []
+        while self.accept("LBRACKET"):
             if self.peek()[0] == "RBRACKET":
-                # Empty dimension - will infer from initializer later
+                # Empty dimension
+                dimensions.append(None)
                 self.expect("RBRACKET")
             elif self.peek()[0] == "INT_LITERAL":
-                array_size = int(self.advance()[1])
+                dimensions.append(int(self.advance()[1]))
                 self.expect("RBRACKET")
             elif self.peek()[0] == "IDENTIFIER":
-                array_size = self.advance()[1]
+                dimensions.append(self.advance()[1])
                 self.expect("RBRACKET")
             else:
+                dimensions.append(None)
                 self.expect("RBRACKET")
+
+        # Determine primary array size from first dimension
+        array_size = dimensions[0] if dimensions else None
+        # Store all dimensions for codegen
+        full_dims = dimensions if len(dimensions) > 1 else None
 
         init = None
         if self.accept("ASSIGN"):
@@ -573,7 +581,7 @@ class Parser:
         elif self.peek()[0] == "LBRACE":
             init = self.parse_init_list()
 
-        decls = [Declaration(typ, name, init, array_size)]
+        decls = [Declaration(typ, name, init, array_size, full_dims)]
 
         while self.accept("COMMA"):
             extra_name = self.expect("IDENTIFIER")[1]

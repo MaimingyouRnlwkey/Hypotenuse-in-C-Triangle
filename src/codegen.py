@@ -857,7 +857,6 @@ class CodeGen:
         # Handle function prototypes: var_type is "void (func prototype)"
         if "(func prototype)" in node.var_type:
             # Extract return type and params from name if stored
-            # For now, output a placeholder or skip
             actual_type = node.var_type.replace(" (func prototype)", "")
             actual_type = self._map_type(actual_type)
             # Try to get params from node if available
@@ -869,15 +868,31 @@ class CodeGen:
                 self._emit(f"{actual_type} {name}(void);")
             return
 
-        if array_size is not None:
+        # Check for multi-dimensional arrays first
+        if (
+            hasattr(node, "dimensions")
+            and node.dimensions
+            and isinstance(node.dimensions, list)
+            and len(node.dimensions) > 1
+        ):
+            # Multi-dimensional array: int arr[2][3]
+            dim_str = "".join(f"[{d}]" for d in node.dimensions if d)
+            name = f"{node.name}{dim_str}"
+        elif array_size is not None:
             name = f"{node.name}[{array_size}]"
-        elif node.initializer is not None and isinstance(node.initializer, InitList):
-            # Empty dimension with initializer - use element count as size
-            count = len(node.initializer.elements) if node.initializer.elements else 0
-            if count > 0:
-                name = f"{node.name}[{count}]"
-            else:
-                name = node.name
+
+        # Check for multi-dimensional arrays first
+        if (
+            hasattr(node, "dimensions")
+            and node.dimensions
+            and isinstance(node.dimensions, list)
+            and len(node.dimensions) > 1
+        ):
+            # Multi-dimensional array: int arr[2][3]
+            dim_str = "".join(f"[{d}]" for d in node.dimensions if d)
+            name = f"{node.name}{dim_str}"
+        elif array_size is not None:
+            name = f"{node.name}[{array_size}]"
 
         if node.initializer is not None:
             val = self._expr(node.initializer)
