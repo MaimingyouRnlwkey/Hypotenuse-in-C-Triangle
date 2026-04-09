@@ -467,10 +467,13 @@ class CodeGen:
                     check_libs.append("plstd")
 
                 # Check if any of the potential libraries was imported
+                # Also check for path-based imports like <plstd/printd>
                 lib_imported = any(
                     (imp.source == l)
                     or (imp.source == f"<{l}>")
                     or (imp.source == f'"{l}"')
+                    # Also check path-based imports: <plstd/printd> imports plstd
+                    or (imp.source.startswith(f"<{l}/"))
                     for imp in imports
                     for l in check_libs
                 )
@@ -575,14 +578,6 @@ class CodeGen:
             prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
         else:
             prefix = lib_name
-
-        # Auto-expose path-based imports like <plstd/printd>
-        # This is equivalent to "expose <plstd>" - makes functions accessible without @lib suffix
-        if "/" in lib_name:
-            folder = lib_name.split("/")[0]
-            if folder == "plstd":
-                self._plstd_exposed = True
-            self._exposed_libs.add(folder)
 
         for decl in plib_ast.declarations:
             # Skip includes/defines - already handled above
