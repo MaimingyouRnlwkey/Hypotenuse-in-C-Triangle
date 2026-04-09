@@ -868,34 +868,36 @@ class CodeGen:
                 self._emit(f"{actual_type} {name}(void);")
             return
 
-        # Check for multi-dimensional arrays first
-        if (
-            hasattr(node, "dimensions")
-            and node.dimensions
-            and isinstance(node.dimensions, list)
-            and len(node.dimensions) > 1
-        ):
-            # Multi-dimensional array: int arr[2][3]
-            dim_str = "".join(f"[{d}]" for d in node.dimensions if d)
+        # Check for multi-dimensional arrays
+        dims = getattr(node, "dimensions", None)
+        if dims and isinstance(dims, list) and len(dims) > 1:
+            # Full multi-dimensional: int arr[2][3]
+            dim_str = "".join(f"[{d}]" for d in dims if d)
             name = f"{node.name}{dim_str}"
+        elif dims and isinstance(dims, list) and len(dims) == 1:
+            # Single dim stored in dimensions: use it
+            name = f"{node.name}[{dims[0]}]"
         elif array_size is not None:
             name = f"{node.name}[{array_size}]"
 
-        # Check for multi-dimensional arrays first
-        if (
-            hasattr(node, "dimensions")
-            and node.dimensions
-            and isinstance(node.dimensions, list)
-            and len(node.dimensions) > 1
-        ):
-            # Multi-dimensional array: int arr[2][3]
-            dim_str = "".join(f"[{d}]" for d in node.dimensions if d)
-            name = f"{node.name}{dim_str}"
-        elif array_size is not None:
-            name = f"{node.name}[{array_size}]"
+        # If still no name set, use node.name
+        if "name" not in dir() or not name:
+            name = node.name
 
         if node.initializer is not None:
             val = self._expr(node.initializer)
+            # For nested init lists, count top-level elements for missing first dim
+            if isinstance(node.initializer, InitList) and dims:
+                # Count rows in initializer
+                elem_count = (
+                    len(node.initializer.elements) if node.initializer.elements else 0
+                )
+                # Build full dimension string, inferring missing dims
+                full_dims = list(dims) if dims else []
+                if full_dims and full_dims[0] is None and elem_count > 0:
+                    full_dims[0] = elem_count
+                    dim_str = "".join(f"[{d}]" for d in full_dims if d)
+                    name = f"{node.name}{dim_str}"
             self._emit(f"{typ} {name} = {val};")
         else:
             self._emit(f"{typ} {name};")
