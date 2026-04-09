@@ -568,6 +568,14 @@ class Parser:
 
         decls = [Declaration(typ, name, init, array_size)]
 
+        init = None
+        if self.accept("ASSIGN"):
+            init = self.parse_assignment()
+        elif self.peek()[0] == "LBRACE":
+            init = self.parse_init_list()
+
+        decls = [Declaration(typ, name, init, array_size)]
+
         while self.accept("COMMA"):
             extra_name = self.expect("IDENTIFIER")[1]
             extra_init = None

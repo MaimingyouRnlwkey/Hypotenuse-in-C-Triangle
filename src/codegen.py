@@ -35,6 +35,7 @@ from parser import (
     LibAccess,
     SpaceDecl,
     TypeExpr,
+    FieldAccess,
 )
 
 
@@ -494,19 +495,27 @@ class CodeGen:
                 continue
 
             if exp_target.startswith("<") and exp_target.endswith(">"):
-                exp_target = exp_target[1:-1]
+                exp_target = exp.target[1:-1]
 
+            # Check if the library was imported
+            # OR if this specific item was imported (e.g., using printd from <plstd>)
             lib_imported = any(
                 (imp.source == exp_target)
                 or (imp.source == f"<{exp_target}>")
                 or (imp.source == f'"{exp_target}"')
+                # Check if the specific item was imported
+                or (imp.item == exp_target)
                 for imp in imports
             )
             if not lib_imported:
-                raise ValueError(
-                    f"Cannot expose '{exp.target}' - it must be imported first. "
-                    f'Use: using "{exp.target}" before exposing it.'
-                )
+                # Also check path-based imports
+                if any(
+                    imp.source.startswith(f"<{exp_target}/")
+                    or imp.source == f"<{exp_target}>"
+                    or imp.source == exp_target
+                    for imp in imports
+                ):
+                    lib_imported = True
             # Track that this library is now exposed
             if exp.target == "plstd" or exp_target == "plstd":
                 self._plstd_exposed = True
@@ -861,11 +870,7 @@ class CodeGen:
             return
 
         if array_size is not None:
-            if isinstance(array_size, list):
-                dims = "".join(f"[{s}]" for s in array_size)
-                name = f"{node.name}{dims}"
-            else:
-                name = f"{node.name}[{array_size}]"
+            name = f"{node.name}[{array_size}]"
         if node.initializer is not None:
             val = self._expr(node.initializer)
             self._emit(f"{typ} {name} = {val};")
