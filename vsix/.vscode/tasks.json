@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "label": "Compile C△ File",
+      "command": "${config:ctriangle.compilerPath}",
+      "args": [
+        "-c",
+        "${file}"
+      ],
+      "problemMatcher": [],
+      "group": "build",
+      "detail": "Compile the current C△ file with hypotenuse"
+    },
+    {
+      "type": "shell",
+      "label": "Build VSIX Extension",
+      "command": "vsce package",
+      "args": [],
+      "problemMatcher": [],
+      "group": "build",
+      "dependsOn": ["Compile TypeScript"],
+      "detail": "Package the VSIX extension"
+    },
+    {
+      "type": "shell",
+      "label": "Compile TypeScript",
+      "command": "npx tsc -p ./tsconfig.json",
+      "args": [],
+      "problemMatcher": [],
+      "group": "build",
+      "detail": "Compile TypeScript for VSIX extension"
+    },
+    {
+      "type": "shell",
+      "label": "Run C△ File",
+      "command": "${config:ctriangle.compilerPath}",
+      "args": [
+        "-c",
+        "${file}"
+      ],
+      "problemMatcher": [],
+      "group": "test",
+      "isBackground": false,
+      "detail": "Compile and run the current C△ file"
+    },
+    {
+      "type": "shell",
+      "label": "Debug with GDB",
+      "command": "gdb",
+      "args": [
+        "-q",
+        "${fileDirname}/${fileBasenameNoExtension}"
+      ],
+      "problemMatcher": [],
+      "group": "debug",
+      "detail": "Debug the compiled executable with GDB"
+    }
+  ]
+}

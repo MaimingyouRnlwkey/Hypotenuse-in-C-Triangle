@@ -35,7 +35,7 @@ const KEYWORD_INFO: { [key: string]: string } = {
 
 function getCompilerPath(): string {
     const config = vscode.workspace.getConfiguration('ctriangle');
-    return config.get<string>('compilerPath') || 'python3';
+    return config.get<string>('compilerPath') || 'hypotenuse';
 }
 
 function registerCompletionProvider(document: vscode.TextDocument, position: vscode.Position): vscode.CompletionItem[] {
