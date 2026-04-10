@@ -62,7 +62,8 @@ Tests live in the `test/` directory. Add a test for any bug you fix or feature y
 ├── 📂 src/          ← compiler source (lexer, parser, structurer, main)
 ├── 📂 docs/         ← language and compiler documentation
 ├── 📂 test/         ← test files
-├── 📂 errors/       ← error personality messages
+├── 📂 vsix/         ← vscode extension folder
+├── 📂 plstd/        ← plus standard library
 ├── 📂 assets/       ← logo and media
 ├── 📄 makefile      ← build and test targets
 └── 📄 README.MD     ← project overview
