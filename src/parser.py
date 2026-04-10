@@ -351,6 +351,16 @@ class DesignatedInit(Node):
 
 
 @dataclass
+class ArrayDesignation(Node):
+    """C11 array element designator: [expr] = value or [start...end] = value"""
+
+    index: Node
+    value: Node
+    is_range: bool = False  # True for [start...end] = val
+    end_index: Node = None  # End index for ranges
+
+
+@dataclass
 class Generic(Node):
     """C11 _Generic expression: _Generic(expr, type1: val1, type2: val2, ...)"""
 
@@ -1230,8 +1240,17 @@ class Parser:
                 field_type = field_type.strip()
                 field_type = self._consume_pointer_stars(field_type)
                 field_name = self.expect("IDENTIFIER")[1]
+                # Support array fields: int arr[5], int arr[], char s[]
+                array_suffix = ""
+                while self.accept("LBRACKET"):
+                    dim = self.advance()[1] if self.peek()[0] != "RBRACKET" else ""
+                    array_suffix += f"[{dim}]"
+                    self.expect("RBRACKET")
+                full_name = (
+                    f"{field_name}{array_suffix}" if array_suffix else field_name
+                )
                 self.expect("SEMICOLON")
-                fields.append((field_type, field_name))
+                fields.append((field_type, full_name))
             self.expect("RBRACE")
             self.expect("SEMICOLON")
             return StructDef(name=name, fields=fields, is_anonymous=is_anonymous)
@@ -1922,7 +1941,10 @@ class Parser:
     def parse_initializer_element(self) -> Node:
         """Parse a single element in an initializer list.
 
-        Handles both regular expressions and C11 designated initializers (.field = value).
+        Handles C11 designated initializers:
+        - .field = value (struct field)
+        - [expr] = value (array element)
+        - [start...end] = value (array range)
         """
         if self.peek()[0] == "DOT":
             self.advance()
@@ -1930,6 +1952,21 @@ class Parser:
             self.expect("ASSIGN")
             value = self.parse_assignment()
             return DesignatedInit(field=field_name, value=value)
+        if self.peek()[0] == "LBRACKET":
+            self.advance()
+            start_idx = self.parse_expression()
+            if self.accept("ELLIPSIS"):
+                end_idx = self.parse_expression()
+                self.expect("RBRACKET")
+                self.expect("ASSIGN")
+                value = self.parse_assignment()
+                return ArrayDesignation(
+                    index=start_idx, value=value, is_range=True, end_index=end_idx
+                )
+            self.expect("RBRACKET")
+            self.expect("ASSIGN")
+            value = self.parse_assignment()
+            return ArrayDesignation(index=start_idx, value=value)
         return self.parse_assignment()
 
     # ============================================================

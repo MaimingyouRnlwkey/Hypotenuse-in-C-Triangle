@@ -36,6 +36,8 @@ from parser import (
     SpaceDecl,
     TypeExpr,
     FieldAccess,
+    DesignatedInit,
+    ArrayDesignation,
 )
 
 
@@ -309,6 +311,14 @@ class CodeGen:
 
         if isinstance(node, DesignatedInit):
             return f".{node.field} = {self._expr(node.value)}"
+
+        if isinstance(node, ArrayDesignation):
+            idx = self._expr(node.index)
+            val = self._expr(node.value)
+            if node.is_range and node.end_index:
+                end = self._expr(node.end_index)
+                return f"[{idx}...{end}] = {val}"
+            return f"[{idx}] = {val}"
 
         if isinstance(node, CompoundLiteral):
             typ = self._map_type(node.lit_type)
@@ -853,6 +863,28 @@ class CodeGen:
         typ = self._map_type(node.var_type)
         name = node.name
         array_size = getattr(node, "array_size", None)
+
+        # Handle string to char array conversion: char s[] = "hello"
+        if typ == "char" and node.initializer is not None:
+            init_val = node.initializer
+            if (
+                hasattr(init_val, "value")
+                and isinstance(init_val.value, str)
+                and init_val.value.startswith('"')
+            ):
+                # Convert string to char array: "hello" -> {'h','e','l','l','o','\0'}
+                s = init_val.value[1:-1]  # Remove quotes
+                chars = [f"'{c}'" if c not in '\\"' else f"'{c}'" for c in s]
+                chars.append("'\\0'")  # Add null terminator
+                init_str = "{" + ", ".join(chars) + "}"
+                if array_size is None:
+                    # Infer size from string length + null
+                    array_size = len(chars)
+                    name = f"{name}[{array_size}]"
+                else:
+                    name = f"{name}[{array_size}]"
+                self._emit(f"char {name} = {init_str};")
+                return
 
         # Handle function prototypes: var_type is "void (func prototype)"
         if "(func prototype)" in node.var_type:

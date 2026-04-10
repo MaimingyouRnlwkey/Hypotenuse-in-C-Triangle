@@ -30,6 +30,7 @@ from parser import (
     Typedef,
     FieldAccess,
     DesignatedInit,
+    ArrayDesignation,
 )
 from struct_layout import (
     compute_layout,
