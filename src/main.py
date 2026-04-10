@@ -157,12 +157,66 @@ def compile_with_gcc(c_path, output_path=None, extra_flags=None):
 
     if output_path is None:
         output_path = os.path.splitext(c_path)[0]
-    else:
-        output_path = output_path
+    # else: output_path is already set correctly, no need for reassignment
 
     cmd = ["gcc", c_path, "-o", output_path]
+    # Basic validation for extra_flags to prevent obvious injection attempts
     if extra_flags:
-        cmd.extend(extra_flags.split())
+        # Split and filter out any empty strings or potentially dangerous flags
+        flags = [flag for flag in extra_flags.split() if flag.strip()]
+        # Additional safety: reject flags that try to change output file or perform dangerous operations
+        safe_flags = []
+        skip_next = False
+        for i, flag in enumerate(flags):
+            if skip_next:
+                skip_next = False
+                continue
+            # Skip -o and its argument as we control the output file
+            if flag == "-o":
+                skip_next = True  # Skip the next argument (output file)
+                continue
+            # Skip other potentially problematic flags
+            if (
+                flag.startswith("-l")
+                or flag.startswith("-L")
+                or flag.startswith("-I")
+                or flag.startswith("-D")
+            ):
+                # Allow library/include/linker flags as they're generally safe
+                safe_flags.append(flag)
+            elif flag.startswith("-Wl,"):
+                # Allow linker flags
+                safe_flags.append(flag)
+            elif flag in [
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-std=",
+                "-pedantic",
+                "-O0",
+                "-O1",
+                "-O2",
+                "-O3",
+                "-Os",
+                "-Ofast",
+                "-g",
+            ]:
+                # Allow common warning/optimization/debug flags
+                safe_flags.append(flag)
+            elif (
+                flag.startswith("-std=")
+                or flag.startswith("-D")
+                or flag.startswith("-I")
+                or flag.startswith("-L")
+            ):
+                # Allow these prefix-based flags
+                safe_flags.append(flag)
+            elif not flag.startswith("-"):
+                # Non-flag arguments (like source files) - we don't expect these but allow for flexibility
+                safe_flags.append(flag)
+            # Ignore other flags for safety
+
+        cmd.extend(safe_flags)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -190,20 +244,27 @@ def install_to_plibs(source_path):
     system_plibs = "/usr/lib/PLIBS"
     user_plibs = os.path.expanduser("~/.local/lib/PLIBS")
 
+    # Try system location first
     if os.path.exists(system_plibs) and os.access(system_plibs, os.W_OK):
         dest = os.path.join(system_plibs, filename)
         shutil.copy2(source_path, dest)
         print(f"Installed to {dest}")
-    elif os.access(os.path.dirname(user_plibs), os.W_OK) or not os.path.exists(
-        user_plibs
-    ):
-        os.makedirs(user_plibs, exist_ok=True)
-        dest = os.path.join(user_plibs, filename)
-        shutil.copy2(source_path, dest)
-        print(f"Installed to {dest}")
-    else:
-        print("Error: no writable PLIBS folder found")
         return
+
+    # Try user location
+    try:
+        os.makedirs(user_plibs, exist_ok=True)
+        if os.access(user_plibs, os.W_OK):
+            dest = os.path.join(user_plibs, filename)
+            shutil.copy2(source_path, dest)
+            print(f"Installed to {dest}")
+            return
+        else:
+            print(f"Error: no write access to PLIBS folder: {user_plibs}")
+    except OSError as e:
+        print(f"Error: could not create PLIBS folder {user_plibs}: {e}")
+
+    print("Error: no writable PLIBS folder found")
 
 
 def remove_from_plibs(name):
@@ -285,11 +346,17 @@ def main():
                 write_output(c_path, output)
             else:
                 print(output)
-                c_path = path.replace(".ctri", ".c")
+                # Handle both .ctri and .plib file extensions
+                if path.endswith(".ctri"):
+                    c_path = path.replace(".ctri", ".c")
+                elif path.endswith(".plib"):
+                    c_path = path.replace(".plib", ".c")
+                else:
+                    # Fallback - should not happen due to earlier check
+                    c_path = path + ".c"
 
             if args.compile:
-                if not args.output:
-                    write_output(c_path, output)
+                write_output(c_path, output)
                 exe_path = compile_with_gcc(c_path, args.output, args.cflags)
                 print(f"Compiled to: {exe_path}")
 
@@ -299,8 +366,12 @@ def main():
             print(f"Error reading file: {error}")
         except SyntaxError as error:
             print(f"Syntax error: {error}")
-        except Exception as error:
+        except RuntimeError as error:
             print(f"Compilation error: {error}")
+        except Exception as error:
+            # Re-raise unexpected exceptions for debugging while still providing user feedback
+            print(f"Unexpected error: {error}")
+            raise
 
 
 if __name__ == "__main__":
