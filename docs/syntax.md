@@ -265,8 +265,8 @@ See [assembly.md](assembly.md) for full details.
 ## Namespace Access
 
 ```c
-// Access a namespace member with '~'
-mySpace~random()
+// Access a namespace member with '@'
+random@mySpace()
 
 // Globalize a namespace
 expose mySpace
