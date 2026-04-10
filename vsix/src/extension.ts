@@ -10,135 +10,118 @@ const KEYWORDS = [
 ];
 
 const KEYWORD_INFO: { [key: string]: string } = {
-    'using': 'Import library: using printd from <plstd>, using helper from "utils", using scope&myVar',
-    'from': 'Specify library source: from <plstd>, from "file"',
-    'expose': 'Make functions accessible without namespace: expose printd@plstd',
-    'space': 'Define namespace in .plib file: space math',
-    'as': 'Alias in import: using printd as pd from <plstd>',
-    'lib': 'Shortcut for plstd standard library',
-    'plstd': 'Standard library namespace',
-    'typed': 'Native type struct with inheritance support',
-    'struct': 'Plain struct without inheritance',
-    'init': 'Struct constructor lifecycle',
-    'end': 'Struct destructor lifecycle',
-    'self': 'Optional self-reference in struct member functions',
-    'lamb': 'Named lambda expression',
-    'dynam': 'Dynamic array type with .push(), .pop(), .remove(index)',
-    'auto': 'Dynamic/inferred type resolved at runtime',
-    'tuple': 'Heterogeneous list: tuple t = [1, "hello", 3.14]',
-    'string': 'First-class string type with + concatenation and {expr} interpolation',
-    'autoremove': 'Heap allocation freed automatically at last use',
-    'allocate': 'Heap allocation: allocate int buf[64], allocate int x(200)',
-    'free': 'Manual heap deallocation',
-    'asm': 'Inline assembly block'
+    'using': 'Import a library or symbol. Variants: using "plstd/module", using sym from <plstd>, using sym from "file", using scope&var (intra-file immutable ref). The compiler auto-imports what you use — manual using is optional style.',
+    'from': 'Specifies the source library in a using import: using printd from <plstd>, using helper from "utils".',
+    'expose': 'Globalizes a library or namespace so its symbols are directly accessible without a prefix. Variants: expose plstd, expose lib@module, expose mySpace.',
+    'space': 'Declares a named namespace block inside a .plib library file. Members are accessed via the @ operator (e.g. func@mySpace).',
+    'as': 'Alias a symbol at the point of import: using printd as pd from <plstd>.',
+    'lib': 'Refers to the plstd standard library.',
+    'plstd': 'The C\u25b3 standard library. Contains printd, printfs, len, and more.',
+    'typed': '(future) Declares a struct that becomes a native type with inheritance support via &. e.g. typed struct Dog&Animal.',
+    'struct': 'Declares a plain struct with constructors and member functions but no inheritance.',
+    'init': 'Struct constructor lifecycle function — runs when an instance is created.',
+    'end': 'Struct destructor lifecycle function — runs when an instance is freed or goes out of scope.',
+    'self': 'Optional self-reference inside struct member functions and lifecycle blocks.',
+    'lamb': '(future) Declares a named lambda with typed parameters. Always named, never anonymous.',
+    'dynam': '(future) Dynamic array type supporting .push(), .pop(), .remove(index). Sized by len().',
+    'auto': '(future) Dynamic/inferred type resolved at compile time via the simulation pass. Use %k format specifier with printd.',
+    'tuple': '(future) Heterogeneous list type declared with [] syntax. Sized by len().',
+    'string': '(future) First-class string type supporting + concatenation and {expr} f-string interpolation.',
+    'autoremove': 'Heap-allocates a value that is automatically freed by the compiler at its last point of use (simulation pass). Supports the robbery ownership pattern.',
+    'allocate': 'Heap-allocates a named value: allocate int buf[64], allocate int x(200). Pair with free or use autoremove.',
+    'free': 'Manually releases heap memory allocated with allocate.',
+    'asm': 'Declares an inline assembly function or block. Compiled by NASM and linked into the binary. Uses syntax x86_64_linux. return replaces ret; implicit return is rax.',
+    'printd': 'plstd type-aware print function. Uses printf-style format specifiers. Use %k for auto-typed values.',
+    'printfs': 'plstd f-string print function. Embeds expressions using {expr} syntax.',
+    'len': 'Built-in language function returning the length of a string, dynam array, or tuple. No import needed.',
+    'restrict': 'REMOVED in C\u25b3 — raises SyntaxError.',
+    '_Bool': 'REMOVED in C\u25b3 — raises SyntaxError.',
+    '_Complex': 'REMOVED in C\u25b3 — raises SyntaxError.',
+    '_Imaginary': 'REMOVED in C\u25b3 — raises SyntaxError.',
 };
 
-function getCompilerPath(): string {
-    const config = vscode.workspace.getConfiguration('ctriangle');
-    return config.get<string>('compilerPath') || 'hypotenuse';
-}
-
-function registerCompletionProvider(document: vscode.TextDocument, position: vscode.Position): vscode.CompletionItem[] {
-    const line = document.lineAt(position.line).text;
-    const word = document.getText(new vscode.Range(position.translate(0, -1), position));
-    const items: vscode.CompletionItem[] = [];
-
-    for (const kw of KEYWORDS) {
-        if (kw.startsWith(word.toLowerCase())) {
-            const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
-            if (KEYWORD_INFO[kw]) {
-                item.detail = KEYWORD_INFO[kw];
-            }
-            items.push(item);
-        }
-    }
-    return items;
-}
-
-function lintDocument(document: vscode.TextDocument): vscode.Diagnostic[] {
-    const diagnostics: vscode.Diagnostic[] = [];
-    const text = document.getText();
-    const lines = text.split('\n');
-
-    let inBlockComment = false;
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-
-        if (line.startsWith('/*')) {
-            inBlockComment = true;
-        }
-        if (inBlockComment) {
-            if (line.includes('*/')) {
-                inBlockComment = false;
-            }
-            continue;
-        }
-
-        if (line.startsWith('//') || line === '') {
-            continue;
-        }
-
-        if (line.includes('using') && line.includes('<') && !line.includes('>')) {
-            const diag = new vscode.Diagnostic(new vscode.Range(i, line.indexOf('<'), i, line.length), 'Missing closing >', vscode.DiagnosticSeverity.Error);
-            diagnostics.push(diag);
-        }
-
-        const braceMatch = line.match(/\{/g);
-        const closeMatch = line.match(/\}/g);
-        if (braceMatch && closeMatch && braceMatch.length !== closeMatch.length) {
-            const diag = new vscode.Diagnostic(new vscode.Range(i, 0, i, line.length), 'Unbalanced braces', vscode.DiagnosticSeverity.Warning);
-            diagnostics.push(diag);
-        }
-    }
-
-    return diagnostics;
-}
-
-export function activate(context: vscode.ExtensionContext) {
-    const selector = { language: 'c△', scheme: 'file' };
+function activate(context: vscode.ExtensionContext) {
+    const selector = { language: 'c\u25b3', scheme: 'file' };
 
     const completionProvider = vscode.languages.registerCompletionItemProvider(selector, {
-        provideCompletionItems(document, position) {
-            return registerCompletionProvider(document, position);
-        }
-    }, ...['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']);
-
-    const hoverProvider = vscode.languages.registerHoverProvider(selector, {
-        provideHover(document, position) {
-            const range = document.getWordRangeAtPosition(position);
-            if (range) {
-                const word = document.getText(range);
-                if (KEYWORD_INFO[word.toLowerCase()]) {
-                    return new vscode.Hover(KEYWORD_INFO[word.toLowerCase()], range);
+        provideCompletionItems(document: vscode.TextDocument, position: vscode.Position) {
+            const word = document.getText(new vscode.Range(position.translate(0, -1), position));
+            const items: vscode.CompletionItem[] = [];
+            for (const kw of KEYWORDS) {
+                if (kw.startsWith(word.toLowerCase())) {
+                    const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
+                    if (KEYWORD_INFO[kw]) {
+                        item.detail = KEYWORD_INFO[kw];
+                    }
+                    items.push(item);
                 }
             }
-            return null;
+            return items;
+        }
+    }, ...['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z']);
+
+    const hoverProvider = vscode.languages.registerHoverProvider(selector, {
+        provideHover(document: vscode.TextDocument, position: vscode.Position) {
+            const range = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+            if (!range) return null;
+            const word = document.getText(range);
+            const info = KEYWORD_INFO[word] || KEYWORD_INFO[word.toLowerCase()];
+            if (!info) return null;
+            const md = new vscode.MarkdownString(`**\`${word}\`** — ${info}`);
+            md.isTrusted = true;
+            return new vscode.Hover(md, range);
         }
     });
 
     const diagnosticCollection = vscode.languages.createDiagnosticCollection('ctriangle');
 
-    const lintDocumentWrapper = (document: vscode.TextDocument) => {
-        if (document.fileName.endsWith('.ctri') || document.fileName.endsWith('.plib')) {
-            diagnosticCollection.set(document.uri, lintDocument(document));
+    const lintDocument = (document: vscode.TextDocument) => {
+        if (!document.fileName.endsWith('.ctri') && !document.fileName.endsWith('.plib')) return;
+        const diagnostics: vscode.Diagnostic[] = [];
+        const lines = document.getText().split('\n');
+        let inBlockComment = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('/*')) inBlockComment = true;
+            if (inBlockComment) {
+                if (line.includes('*/')) inBlockComment = false;
+                continue;
+            }
+            if (line.startsWith('//') || line === '') continue;
+
+            const deprecated = ['restrict', '_Bool', '_Complex', '_Imaginary'];
+            for (const kw of deprecated) {
+                const idx = line.indexOf(kw);
+                if (idx !== -1) {
+                    diagnostics.push(new vscode.Diagnostic(
+                        new vscode.Range(i, idx, i, idx + kw.length),
+                        `'${kw}' is removed in C\u25b3 and will raise a SyntaxError`,
+                        vscode.DiagnosticSeverity.Error
+                    ));
+                }
+            }
+
+            if (line.includes('using') && line.includes('<') && !line.includes('>')) {
+                diagnostics.push(new vscode.Diagnostic(
+                    new vscode.Range(i, line.indexOf('<'), i, line.length),
+                    'Missing closing > in import',
+                    vscode.DiagnosticSeverity.Error
+                ));
+            }
         }
+        diagnosticCollection.set(document.uri, diagnostics);
     };
 
-    const openListener = vscode.workspace.onDidOpenTextDocument((doc) => {
-        lintDocumentWrapper(doc);
-    });
+    context.subscriptions.push(
+        completionProvider,
+        hoverProvider,
+        diagnosticCollection,
+        vscode.workspace.onDidOpenTextDocument(lintDocument),
+        vscode.workspace.onDidChangeTextDocument(e => lintDocument(e.document)),
+        vscode.workspace.onDidSaveTextDocument(lintDocument),
+    );
 
-    const changeListener = vscode.workspace.onDidChangeTextDocument((event) => {
-        lintDocumentWrapper(event.document);
-    });
-
-    const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
-        lintDocumentWrapper(doc);
-    });
-
-    vscode.workspace.textDocuments.forEach(lintDocumentWrapper);
-
-    context.subscriptions.push(completionProvider, hoverProvider, diagnosticCollection, openListener, changeListener, saveListener);
+    vscode.workspace.textDocuments.forEach(lintDocument);
 }
 
 export function deactivate() {}
