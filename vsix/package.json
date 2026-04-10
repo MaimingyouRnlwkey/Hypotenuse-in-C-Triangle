@@ -38,6 +38,33 @@
         "path": "./syntaxes/ctriangle.tmLanguage.json"
       }
     ],
+    "debuggers": [
+      {
+        "type": "gdb",
+        "label": "GDB Debugger",
+        "languages": ["c△"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the executable to debug"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command line arguments",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory"
+              }
+            }
+          }
+        }
+      }
+    ],
     "configuration": {
       "title": "C△ Configuration",
       "properties": {
@@ -69,6 +96,30 @@
         }
       }
     ],
+    "tasks": {
+      "version": "2.0.0",
+      "tasks": [
+        {
+          "type": "shell",
+          "label": "Compile C△ File",
+          "command": "hypotenuse",
+          "args": ["-c", "${file}"],
+          "problemMatcher": [],
+          "group": "build",
+          "detail": "Compile the current C△ file"
+        },
+        {
+          "type": "shell",
+          "label": "Run C△ File",
+          "command": "${fileDirname}/${fileBasenameNoExtension}",
+          "args": [],
+          "problemMatcher": [],
+          "group": "test",
+          "dependsOn": ["Compile C△ File"],
+          "detail": "Run the compiled executable"
+        }
+      ]
+    },
     "colors": [
       {
         "id": "ctriangle.lineHighlight",

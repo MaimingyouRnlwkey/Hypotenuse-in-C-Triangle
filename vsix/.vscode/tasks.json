@@ -15,6 +15,16 @@
     },
     {
       "type": "shell",
+      "label": "Run C△ File",
+      "command": "${fileDirname}/${fileBasenameNoExtension}",
+      "args": [],
+      "problemMatcher": [],
+      "group": "test",
+      "dependsOn": ["Compile C△ File"],
+      "detail": "Run the compiled executable"
+    },
+    {
+      "type": "shell",
       "label": "Build VSIX Extension",
       "command": "vsce package",
       "args": [],
@@ -34,19 +44,6 @@
     },
     {
       "type": "shell",
-      "label": "Run C△ File",
-      "command": "${config:ctriangle.compilerPath}",
-      "args": [
-        "-c",
-        "${file}"
-      ],
-      "problemMatcher": [],
-      "group": "test",
-      "isBackground": false,
-      "detail": "Compile and run the current C△ file"
-    },
-    {
-      "type": "shell",
       "label": "Debug with GDB",
       "command": "gdb",
       "args": [
@@ -55,6 +52,7 @@
       ],
       "problemMatcher": [],
       "group": "debug",
+      "dependsOn": ["Compile C△ File"],
       "detail": "Debug the compiled executable with GDB"
     }
   ]
