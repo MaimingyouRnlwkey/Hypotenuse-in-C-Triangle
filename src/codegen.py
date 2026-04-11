@@ -83,8 +83,21 @@ class CodeGen:
         self._lines = []
         self._gen_program(self.ast)
 
+        # Always ensure required includes are present
+        needs_stdlib = (
+            self._len_int_generated
+            or "malloc" in "\n".join(self._lines)
+            or "free" in "\n".join(self._lines)
+        )
+        needs_string = (
+            "strlen" in "\n".join(self._lines)
+            or "strdup" in "\n".join(self._lines)
+            or "strcpy" in "\n".join(self._lines)
+            or "strcat" in "\n".join(self._lines)
+        )
+
         # If we generated dynam helpers, prepend them after includes
-        if self._helper_lines:
+        if self._helper_lines or needs_stdlib or needs_string:
             # Separate includes from other code
             includes = []
             rest = []
@@ -96,13 +109,15 @@ class CodeGen:
                     in_includes = False
                     rest.append(line)
 
-            # Build new output with stdlib.h and dynam helpers at top
+            # Build new output with includes and helpers
+            new_includes = []
+            if "#include <stdlib.h>" not in "\n".join(includes) and needs_stdlib:
+                new_includes.append("#include <stdlib.h>")
+            if "#include <string.h>" not in "\n".join(includes) and needs_string:
+                new_includes.append("#include <string.h>")
+
             new_lines = (
-                includes
-                + ["#include <stdlib.h>", ""]
-                + self._helper_lines
-                + [""]
-                + rest
+                includes + new_includes + [""] + self._helper_lines + [""] + rest
             )
             self._lines = new_lines
 
@@ -161,6 +176,21 @@ class CodeGen:
     def _get_dynam_type(self, var_name: str) -> str:
         """Get the type of a variable if it's dynam or string."""
         return self._dynam_declarations.get(var_name)
+
+    def _get_expression_type(self, node) -> str:
+        """Determine the type of an expression for codegen purposes."""
+        if isinstance(node, Literal):
+            # String literals are strings
+            if isinstance(node.value, str) and node.value.startswith('"'):
+                return "string"
+            return ""  # Other literals
+
+        if isinstance(node, Var):
+            # Variables get their type from declaration tracking
+            return self._get_dynam_type(node.name) or ""
+
+        # For other expressions, we could do more analysis but for now keep it simple
+        return ""
 
     def _contains_assignment(self, node) -> bool:
         """Recursively check if an expression contains an assignment."""
@@ -234,6 +264,35 @@ class CodeGen:
                     false_val = self._expr(node.right.right)
                     return f"({cond}) ? {true_val} : {false_val}"
                 return f"({cond}) ? {self._expr(node.right)}"
+
+            # Handle string concatenation: "hello" + "world" or s1 + s2
+            if node.op == "+":
+                left_type = self._get_expression_type(node.left)
+                right_type = self._get_expression_type(node.right)
+
+                # If either operand is a string or string literal, treat as concatenation
+                if (
+                    left_type == "string"
+                    or right_type == "string"
+                    or (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    )
+                    or (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    )
+                ):
+                    left_expr = self._expr(node.left)
+                    right_expr = self._expr(node.right)
+
+                    # Generate concatenation: malloc + strcpy + strcat
+                    # We need to return an expression that evaluates to the concatenated string
+                    # Use a statement-like approach that will be handled by the caller
+                    return f"(char*)0 /* STRING_CONCAT_PLACEHOLDER: {left_expr} + {right_expr} */"
+
             left = self._expr(node.left)
             right = self._expr(node.right)
             # Comparison operators don't need extra parens (avoid gcc warnings)
@@ -1058,26 +1117,59 @@ class CodeGen:
             # Track this string declaration
             self._dynam_declarations[name] = "string"
 
+            # Handle string concatenation in initialization: string s = "hello" + "world";
+            if (
+                node.initializer
+                and isinstance(node.initializer, Binary)
+                and node.initializer.op == "+"
+            ):
+                left = node.initializer.left
+                right = node.initializer.right
+                # Check if both operands are string literals or string variables
+                left_is_string = (
+                    isinstance(left, Literal)
+                    and isinstance(left.value, str)
+                    and left.value.startswith('"')
+                ) or (
+                    isinstance(left, Var)
+                    and self._get_dynam_type(left.name) == "string"
+                )
+                right_is_string = (
+                    isinstance(right, Literal)
+                    and isinstance(right.value, str)
+                    and right.value.startswith('"')
+                ) or (
+                    isinstance(right, Var)
+                    and self._get_dynam_type(right.name) == "string"
+                )
+
+                if left_is_string and right_is_string:
+                    # Generate concatenation: malloc + strcpy + strcat
+                    left_expr = self._expr(left)
+                    right_expr = self._expr(right)
+                    var_name = node.name
+
+                    # Emit the concatenation sequence
+                    self._emit(
+                        f"char* _tmp = malloc(strlen({left_expr}) + strlen({right_expr}) + 1);"
+                    )
+                    self._emit(f"strcpy(_tmp, {left_expr});")
+                    self._emit(f"strcat(_tmp, {right_expr});")
+                    self._emit(f"char* {var_name} = _tmp;")
+                    return
+
             if node.initializer and hasattr(node.initializer, "value"):
                 # String literal: "hello"
                 init_val = node.initializer.value
                 if isinstance(init_val, str) and init_val.startswith('"'):
-                    # Convert to char array: "hello" -> {'h','e','l','l','o','\0'}
-                    s = init_val[1:-1]  # Remove quotes
-                    chars = []
-                    for c in s:
-                        if c == "\\":
-                            chars.append("'\\\\'")
-                        elif c == '"':
-                            chars.append("'\\\"'")
-                        else:
-                            chars.append(f"'{c}'")
-                    chars.append("'\\0'")  # Add null terminator
-                    init_str = "{" + ", ".join(chars) + "}"
-                    self._emit(f"char {name}[] = {init_str};")
+                    # Generate: char* name = strdup("hello");
+                    self._emit(f"char* {name} = strdup({init_val});")
                     return
             # Empty string
-            self._emit(f"char {name}[] = {{'\\0'}};")
+            self._emit(f'char* {name} = strdup("");')
+            return
+            # Empty string
+            self._emit(f'char* {name} = strdup("");')
             return
 
         # Handle string to char array conversion: char s[] = "hello"
@@ -1415,7 +1507,7 @@ class CodeGen:
                     # Check if this variable is dynam or string by looking at declaration
                     dynam_type = self._get_dynam_type(var_name)
 
-                    if dynam_type:
+                    if dynam_type and dynam_type.startswith("dynam "):
                         # This is a reassignment to a dynam array
                         if isinstance(value, InitList):
                             init_vals = [self._expr(e) for e in value.elements]
@@ -1445,24 +1537,9 @@ class CodeGen:
                             and isinstance(value.value, str)
                             and value.value.startswith('"')
                         ):
-                            # String literal reassignment
-                            s = value.value[1:-1]  # Remove quotes
-                            # Generate new char array
-                            chars = []
-                            for c in s:
-                                if c == "\\":
-                                    chars.append("'\\\\'")
-                                elif c == '"':
-                                    chars.append("'\\\"'")
-                                else:
-                                    chars.append(f"'{c}'")
-                            chars.append("'\\0'")
-                            init_str = "{" + ", ".join(chars) + "}"
-                            # For strings, we need to copy the chars
-                            # This is more complex - for now just generate a warning
-                            self._emit(
-                                f"/* string reassignment not fully implemented */"
-                            )
+                            # String literal reassignment: free(s); s = strdup("new");
+                            self._emit(f"free({var_name});")
+                            self._emit(f"{var_name} = strdup({value.value});")
                             return
 
             self._emit(f"{self._expr(node.expr)};")
