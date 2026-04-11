@@ -1,8 +1,0 @@
-#include <unistd.h>
-
-using "plstd/printd";
-
-int main() {
-    printd@lib("Test 2: Hello %s, num=%d\n", "test", 123);
-    return 0;
-}
