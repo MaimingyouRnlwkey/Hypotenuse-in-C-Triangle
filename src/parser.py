@@ -2260,6 +2260,11 @@ class Parser:
                 type1 = f"{type1} {type2}"
             type1 = self._consume_pointer_stars(type1)
             return TypeExpr(type1)
+        # Handle typedef names (user-defined types)
+        if self.peek()[0] == "IDENTIFIER" and self.peek()[1] in self._typedefs:
+            type_name = self.advance()[1]
+            type_name = self._consume_pointer_stars(type_name)
+            return TypeExpr(type_name)
         if self.peek()[0] == "STRUCT":
             self.advance()
             type_name = "struct"
@@ -2375,40 +2380,37 @@ class Parser:
             return Literal(self.advance()[1])
         if tok[0] == "LPAREN":
             self.advance()
-            node = self.parse_expression()
-            self.expect("RPAREN")
-            return CompoundLiteral("()", [node]) if self.accept("LBRACE") else node
-        if tok[0] == "LBRACE":
-            return self.parse_init_list()
-        if tok[0] == "LPAREN":
-            self.advance()
-            if self.peek()[0] in (
-                "INT",
-                "CHAR",
-                "VOID",
-                "FLOAT",
-                "DOUBLE",
-                "SHORT",
-                "LONG",
-                "SIGNED",
-                "UNSIGNED",
-                "CONST",
-                "VOLATILE",
+            # Check if this is a cast: (type)expr vs grouping: (expr)
+            # Cast if: base type, struct/union/enum keyword, or typedef name
+            is_typedef = (
+                self.peek()[0] == "IDENTIFIER" and self.peek()[1] in self._typedefs
+            )
+            if (
+                self.peek()[0] in _BASE_TYPE_TOKENS
+                or self.peek()[0]
+                in (
+                    "STRUCT",
+                    "UNION",
+                    "ENUM",
+                )
+                or is_typedef
             ):
+                # Cast path - go to cast handling
+                # First, save position so we can resume here
+                # Handle type with pointer/array suffixes and potential compound literal
+                # Then parse operand and return Cast node
                 type_node = self.parse_type_expression()
                 while self.peek()[0] == "MULTIPLY":
                     self.advance()
                     type_node.type_name += "*"
-                # Handle array type suffix: (int[])...
                 if self.peek()[0] == "LBRACKET":
-                    self.advance()  # consume '['
+                    self.advance()
                     if self.peek()[0] == "RBRACKET":
                         type_node.type_name += "[]"
                     else:
                         size = self.expect("INT_LITERAL")[1]
                         type_node.type_name += f"[{size}]"
                     self.expect("RBRACKET")
-                # Check for compound literal: (type){ ... }
                 if self.peek()[0] == "LBRACE":
                     init_list = self.parse_init_list()
                     return CompoundLiteral(
@@ -2417,42 +2419,13 @@ class Parser:
                 self.expect("RPAREN")
                 operand = self.parse_unary()
                 return Cast(cast_type=type_node.type_name, operand=operand)
-            elif self.peek()[0] in ("STRUCT", "UNION", "ENUM"):
-                type_name = self.advance()[1]
-                if self.peek()[0] == "IDENTIFIER":
-                    type_name += " " + self.advance()[1]
-                while self.peek()[0] == "MULTIPLY":
-                    self.advance()
-                    type_name += "*"
-                # Check for compound literal: (struct Name){ ... }
-                if self.peek()[0] == "LBRACE":
-                    init_list = self.parse_init_list()
-                    return CompoundLiteral(
-                        lit_type=type_name, elements=init_list.elements
-                    )
+            else:
+                # Grouping: (expr)
+                node = self.parse_expression()
                 self.expect("RPAREN")
-                operand = self.parse_unary()
-                return Cast(cast_type=type_name, operand=operand)
-            elif self.peek()[0] == "IDENTIFIER":
-                ident = self.peek()[1]
-                if ident in self._typedefs:
-                    type_name = self.advance()[1]
-                    if self.peek()[0] == "IDENTIFIER":
-                        type_name += " " + self.advance()[1]
-                    while self.peek()[0] == "MULTIPLY":
-                        self.advance()
-                        type_name += "*"
-                    if self.peek()[0] == "LBRACE":
-                        init_list = self.parse_init_list()
-                        return CompoundLiteral(
-                            lit_type=type_name, elements=init_list.elements
-                        )
-                    self.expect("RPAREN")
-                    operand = self.parse_unary()
-                    return Cast(cast_type=type_name, operand=operand)
-            expr = self.parse_expression()
-            self.expect("RPAREN")
-            return expr
+                return CompoundLiteral("()", [node]) if self.accept("LBRACE") else node
+        if tok[0] == "LBRACE":
+            return self.parse_init_list()
         if tok[0] in _BASE_TYPE_TOKENS:
             return TypeExpr(self.advance()[1])
         if tok[0] == "LBRACKET":
