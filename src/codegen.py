@@ -295,6 +295,59 @@ class CodeGen:
 
             left = self._expr(node.left)
             right = self._expr(node.right)
+
+            # Handle string comparisons: s == "hello" or s1 == s2
+            if node.op in ("==", "!="):
+                left_type = self._get_expression_type(node.left)
+                right_type = self._get_expression_type(node.right)
+
+                # If comparing strings, we need to use strcmp
+                if (
+                    left_type == "string"
+                    or (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    )
+                ) or (
+                    right_type == "string"
+                    or (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    )
+                ):
+                    # Handle string literal comparison: s == "hello" -> strcmp(s, "hello") == 0
+                    if (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    ):
+                        # "hello" == s -> strcmp(s, "hello") == 0
+                        return (
+                            f"(strcmp({right}, {left}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({right}, {left}) != 0)"
+                        )
+                    elif (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    ):
+                        # s == "hello" -> strcmp(s, "hello") == 0
+                        return (
+                            f"(strcmp({left}, {right}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({left}, {right}) != 0)"
+                        )
+                    else:
+                        # s1 == s2 -> strcmp(s1, s2) == 0
+                        return (
+                            f"(strcmp({left}, {right}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({left}, {right}) != 0)"
+                        )
+
             # Comparison operators don't need extra parens (avoid gcc warnings)
             if node.op in ("==", "!=", "<", ">", "<=", ">="):
                 return f"{left} {node.op} {right}"
@@ -305,6 +358,12 @@ class CodeGen:
             if node.op == "sizeof":
                 operand = self._expr(node.operand)
                 return f"sizeof({operand})"
+            # Handle string pointer dereferencing: *s for string s
+            if node.op == "*" and isinstance(node.operand, Var):
+                var_name = node.operand.name
+                if self._get_dynam_type(var_name) == "string":
+                    # For string types, *s should generate *(s) which is correct
+                    return f"*({self._expr(node.operand)})"
             operand = self._expr(node.operand)
             if node.prefix:
                 return f"{node.op}{operand}"
