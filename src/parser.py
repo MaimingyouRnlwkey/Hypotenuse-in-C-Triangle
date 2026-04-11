@@ -689,8 +689,13 @@ class Parser:
         - Function prototypes
         - Global variables
         - Include directives
+        - Namespace blocks (space)
         """
         t = self.peek()
+
+        # Handle namespace blocks (space)
+        if t[0] == "SPACE":
+            return self.parse_space()
 
         # Handle preprocessor directives
         if t[0] == "PREPROCESSOR":
@@ -1134,7 +1139,7 @@ class Parser:
         """Parse a namespace block declaration."""
         self.expect("SPACE")
         t = self.peek()
-        if t[0] == "IDENTIFIER":
+        if t[0] == "IDENTIFIER" or t[0] == "PLSTD":
             name = self.advance()[1]
             self.expect("LBRACE")
             declarations = []
@@ -1143,7 +1148,6 @@ class Parser:
                     self.advance()
                     break
                 declarations.append(self.parse_external())
-            self.expect("SEMICOLON")
             return SpaceDecl(name=name, declarations=declarations)
         else:
             line = t[2] if len(t) > 2 else 0
