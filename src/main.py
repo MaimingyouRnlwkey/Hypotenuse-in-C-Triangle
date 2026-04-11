@@ -1,6 +1,6 @@
 import argparse
 
-# import sys  # removed unused import
+
 import lexer
 import parser as p
 import structure
@@ -66,6 +66,10 @@ def parse_args():
 
 def print_tokens(tokens):
     """Pretty-print a token list."""
+    if not tokens:
+        print("\u250c\u2500 Tokens (none) \u2510")
+        print("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2518")
+        return
     width = max(len(t[0]) for t in tokens)
     print("\u250c\u2500 Tokens " + "\u2500" * (width + 24) + "\u2510")
     for t in tokens:
@@ -175,44 +179,27 @@ def compile_with_gcc(c_path, output_path=None, extra_flags=None):
             if flag == "-o":
                 skip_next = True  # Skip the next argument (output file)
                 continue
-            # Skip other potentially problematic flags
+            # Allow library/include/linker flags
             if (
                 flag.startswith("-l")
                 or flag.startswith("-L")
                 or flag.startswith("-I")
                 or flag.startswith("-D")
             ):
-                # Allow library/include/linker flags as they're generally safe
                 safe_flags.append(flag)
+            # Allow linker flags
             elif flag.startswith("-Wl,"):
-                # Allow linker flags
                 safe_flags.append(flag)
-            elif flag in [
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-std=",
-                "-pedantic",
-                "-O0",
-                "-O1",
-                "-O2",
-                "-O3",
-                "-Os",
-                "-Ofast",
-                "-g",
-            ]:
-                # Allow common warning/optimization/debug flags
-                safe_flags.append(flag)
+            # Allow common warning/optimization/debug flags
             elif (
-                flag.startswith("-std=")
-                or flag.startswith("-D")
-                or flag.startswith("-I")
-                or flag.startswith("-L")
+                flag in ["-Wall", "-Wextra", "-Werror", "-pedantic"]
+                or flag.startswith("-std=")
+                or flag in ["-O0", "-O1", "-O2", "-O3", "-Os", "-Ofast"]
+                or flag == "-g"
             ):
-                # Allow these prefix-based flags
                 safe_flags.append(flag)
+            # Allow non-flag arguments (for flexibility)
             elif not flag.startswith("-"):
-                # Non-flag arguments (like source files) - we don't expect these but allow for flexibility
                 safe_flags.append(flag)
             # Ignore other flags for safety
 

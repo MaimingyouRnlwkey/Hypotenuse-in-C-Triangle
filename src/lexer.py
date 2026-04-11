@@ -31,6 +31,8 @@ Tokens = [
     ("SIGNED", re.compile(r"\bsigned\b")),
     ("UNSIGNED", re.compile(r"\bunsigned\b")),
     ("SIZE_T", re.compile(r"\bsize_t\b")),
+    ("DYNAM", re.compile(r"\bdynam\b")),
+    ("STRING", re.compile(r"\bstring\b")),
     ("STRUCT", re.compile(r"\bstruct\b")),
     ("UNION", re.compile(r"\bunion\b")),
     ("ENUM", re.compile(r"\benum\b")),

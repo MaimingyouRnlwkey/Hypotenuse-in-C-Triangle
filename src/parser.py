@@ -411,6 +411,8 @@ _BASE_TYPE_TOKENS = (
     "SIGNED",
     "UNSIGNED",
     "SIZE_T",
+    "DYNAM",
+    "STRING",
 )
 
 
@@ -517,26 +519,60 @@ class Parser:
     def _parse_local_declaration(self) -> Node:
         """Parse a local variable declaration inside a function."""
         typ = self.advance()[1]
-        if typ in self._typedefs:
+
+        # Special handling for dynam type: "dynam <element_type>"
+        if typ == "dynam":
+            elem_typ = self.advance()[1]  # get element type like "int"
+            # Check for additional type qualifiers
+            while self.peek()[0] in _BASE_TYPE_TOKENS:
+                next_tok = self.peek()
+                if next_tok[0] in (
+                    "INT_LITERAL",
+                    "HEX_LITERAL",
+                    "BINARY_LITERAL",
+                    "OCTAL_LITERAL",
+                    "CHAR_LITERAL",
+                    "STRING_LITERAL",
+                    "FLOAT_LITERAL",
+                ):
+                    break
+                elem_typ2 = self.advance()[1]
+                elem_typ = f"{elem_typ} {elem_typ2}"
+            typ = f"dynam {elem_typ}"
+        elif typ in self._typedefs:
             typ = self._typedefs[typ]
         # Handle compound types: long long, unsigned long, etc.
         # Use while loop to handle multiple type qualifiers (long long)
-        while self.peek()[0] in _BASE_TYPE_TOKENS:
-            next_tok = self.peek()
-            # Stop if we hit a literal (handles suffixes like ULL)
-            if next_tok[0] in (
-                "INT_LITERAL",
-                "HEX_LITERAL",
-                "BINARY_LITERAL",
-                "OCTAL_LITERAL",
-                "CHAR_LITERAL",
-                "STRING_LITERAL",
-                "FLOAT_LITERAL",
-            ):
-                break
-            typ2 = self.advance()[1]
-            typ = f"{typ} {typ2}"
-        typ = self._consume_pointer_stars(typ)
+        elif typ not in (
+            "dynam",
+            "string",
+        ):  # Skip compound type handling for special types
+            while self.peek()[0] in _BASE_TYPE_TOKENS:
+                next_tok = self.peek()
+                # Stop if we hit a literal (handles suffixes like ULL)
+                if next_tok[0] in (
+                    "INT_LITERAL",
+                    "HEX_LITERAL",
+                    "BINARY_LITERAL",
+                    "OCTAL_LITERAL",
+                    "CHAR_LITERAL",
+                    "STRING_LITERAL",
+                    "FLOAT_LITERAL",
+                ):
+                    break
+                typ2 = self.advance()[1]
+                typ = f"{typ} {typ2}"
+
+        # Handle string type - just use "string" as the type
+        if typ == "string":
+            # string type doesn't need pointer stars, just return
+            pass
+        elif typ.startswith("dynam "):
+            # dynam type: don't add pointer stars to the dynam itself
+            # (the element type inside dynam can have pointers if needed)
+            pass
+        else:
+            typ = self._consume_pointer_stars(typ)
 
         # Allow literals after compound types (e.g., unsigned long long x = 0xFF)
         if self.peek()[0] not in (
@@ -587,7 +623,11 @@ class Parser:
 
         init = None
         if self.accept("ASSIGN"):
-            init = self.parse_assignment()
+            # Check for dynam array initializer: [1, 2, 3]
+            if self.peek()[0] == "LBRACKET" and typ.startswith("dynam"):
+                init = self.parse_array_initializer()
+            else:
+                init = self.parse_assignment()
         elif self.peek()[0] == "LBRACE":
             init = self.parse_init_list()
 
@@ -1860,10 +1900,19 @@ class Parser:
             # Handle array declarations: char temp[32]
             array_size = None
             if self.peek()[0] == "LBRACKET":
-                self.advance()  # consume '['
-                if self.peek()[0] == "INT_LITERAL":
-                    array_size = int(self.advance()[1])
-                self.expect("RBRACKET")
+                # Simple heuristic: if this is a reassignment (arr = [1,2,3]),
+                # the LBRACKET is NOT an array size but an initializer
+                # Check if this is a redeclaration - if the name already exists,
+                # LBRACKET is an initializer, not array size
+                # For now, just check if we just parsed a name and the previous token is =
+                prev_tok = self.tokens[self.i - 1] if self.i > 0 else None
+                is_reassignment = prev_tok and prev_tok[0] == "ASSIGN"
+
+                if not is_reassignment:
+                    self.advance()  # consume '['
+                    if self.peek()[0] == "INT_LITERAL":
+                        array_size = int(self.advance()[1])
+                    self.expect("RBRACKET")
 
             # Handle initialization
             init = None
@@ -1936,6 +1985,19 @@ class Parser:
                     break
                 elements.append(self.parse_initializer_element())
         self.expect("RBRACE")
+        return InitList(elements)
+
+    def parse_array_initializer(self) -> InitList:
+        """Parse a bracket-enclosed array initializer: [ expr, expr, ... ]"""
+        self.expect("LBRACKET")
+        elements = []
+        if self.peek()[0] != "RBRACKET":
+            elements.append(self.parse_assignment())
+            while self.accept("COMMA"):
+                if self.peek()[0] == "RBRACKET":
+                    break
+                elements.append(self.parse_assignment())
+        self.expect("RBRACKET")
         return InitList(elements)
 
     def parse_initializer_element(self) -> Node:
@@ -2100,6 +2162,17 @@ class Parser:
             return Unary(op="&", operand=operand, prefix=True)
         return self.parse_postfix()
 
+    def _is_assignment_rhs(self) -> bool:
+        """Check if we're in the right-hand side of an assignment.
+
+        Looks backward to see if the previous token was an ASSIGN.
+        """
+        if self.i == 0:
+            return False
+        # Check if previous token was ASSIGN
+        prev_tok = self.tokens[self.i - 1]
+        return prev_tok[0] == "ASSIGN"
+
     def parse_postfix(self) -> Node:
         """Parse postfix expressions: calls, subscripts, and x++/x--."""
         node = self.parse_primary()
@@ -2122,11 +2195,20 @@ class Parser:
                 self.expect("RPAREN")
                 node = Call(node, args)
             elif self.peek()[0] == "LBRACKET":
-                # Array subscript: expr[index]
-                self.advance()
-                index = self.parse_expression()
-                self.expect("RBRACKET")
-                node = ArrayAccess(node, index)
+                # Check if this is an array subscript (e.g., arr[0]) or array initializer
+                # Array initializer only happens when we're at the start of an expression
+                # Array subscript happens after we've already parsed an expression
+                if isinstance(node, Var) and self._is_assignment_rhs():
+                    # In assignment RHS context, [1, 2, 3] is array initializer
+                    self.advance()  # consume LBRACKET
+                    init = self.parse_array_initializer()
+                    node = init
+                else:
+                    # Array subscript: arr[0]
+                    self.advance()  # consume LBRACKET
+                    index = self.parse_expression()
+                    self.expect("RBRACKET")
+                    node = ArrayAccess(node, index)
             elif self.peek()[0] in ("INCREMENT", "DECREMENT"):
                 # Postfix ++/--: expr++ / expr--
                 op = self.advance()[1]
@@ -2163,9 +2245,16 @@ class Parser:
         return node
 
     def parse_type_expression(self) -> Node:
-        """Parse a type keyword or compound type (e.g., int, long long)."""
+        """Parse a type keyword or compound type (e.g., int, long long, dynam int, string)."""
         if self.peek()[0] in _BASE_TYPE_TOKENS:
             type1 = self.advance()[1]
+            # Handle dynam type: "dynam <element_type>"
+            if type1 == "dynam":
+                elem_type = self.parse_type_expression()
+                return TypeExpr(f"dynam {elem_type.type_name}")
+            # Handle string type (no element type needed)
+            if type1 == "string":
+                return TypeExpr("string")
             if self.peek()[0] in _BASE_TYPE_TOKENS:
                 type2 = self.advance()[1]
                 type1 = f"{type1} {type2}"
@@ -2278,47 +2367,18 @@ class Parser:
             "CHAR_LITERAL",
             "HEX_LITERAL",
             "BINARY_LITERAL",
+            "OCTAL_LITERAL",
+            "STRING_LITERAL",
         ):
             return Literal(self.advance()[1])
-        if tok[0] == "MINUS":
-            next_tok = (
-                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
-            )
-            if next_tok and next_tok[0] in (
-                "INT_LITERAL",
-                "FLOAT_LITERAL",
-                "HEX_LITERAL",
-                "BINARY_LITERAL",
-            ):
-                self.advance()
-                val = self.advance()[1]
-                return Literal(f"-{val}")
-        if tok[0] == "STRING_LITERAL":
-            parts = [self.advance()[1]]
-            while self.peek()[0] == "STRING_LITERAL":
-                parts.append(self.advance()[1])
-            if len(parts) == 1:
-                return Literal(parts[0])
-            return Literal("".join(parts))
-        if tok[0] == "SIZEOF":
+        if tok[0] == "FLOAT_LITERAL":
+            return Literal(self.advance()[1])
+        if tok[0] == "LPAREN":
             self.advance()
-            self.expect("LPAREN")
-            if self.peek()[0] in _TYPE_TOKENS:
-                type_node = self.parse_type_expression()
-                self.expect("RPAREN")
-                return Unary(op="sizeof", operand=type_node, prefix=True)
-            if self.peek()[0] == "STRUCT":
-                self.advance()
-                type_name = "struct"
-                if self.peek()[0] == "IDENTIFIER":
-                    type_name += " " + self.advance()[1]
-                self.expect("RPAREN")
-                return Unary(op="sizeof", operand=TypeExpr(type_name), prefix=True)
-            operand = self.parse_expression()
+            node = self.parse_expression()
             self.expect("RPAREN")
-            return Unary(op="sizeof", operand=operand, prefix=True)
+            return CompoundLiteral("()", [node]) if self.accept("LBRACE") else node
         if tok[0] == "LBRACE":
-            # Brace-init list in expression position
             return self.parse_init_list()
         if tok[0] == "LPAREN":
             self.advance()
@@ -2395,6 +2455,9 @@ class Parser:
             return expr
         if tok[0] in _BASE_TYPE_TOKENS:
             return TypeExpr(self.advance()[1])
+        if tok[0] == "LBRACKET":
+            # Parse as array initializer: [1, 2, 3]
+            return self.parse_array_initializer()
         if tok[0] == "UNDERSCORE_GENERIC":
             return self.parse_generic()
         line = tok[2] if len(tok) > 2 else 0
