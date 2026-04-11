@@ -368,9 +368,33 @@ class CodeGen:
                         if isinstance(arg, Literal):
                             # Extract the numeric value
                             val = arg.value
-                            if isinstance(val, str) and val.lstrip("-").isdigit():
-                                self._len_int_generated = True
-                                return f"len_int({val})"
+                            # Check if it's an integer (with optional suffix like L, LL, U, UL)
+                            if isinstance(val, str):
+                                stripped = val.lstrip("-")
+                                # Integer with optional suffix (L, LL, U, UL, etc.)
+                                if (
+                                    stripped.replace("L", "")
+                                    .replace("U", "")
+                                    .replace("u", "")
+                                    .isdigit()
+                                ):
+                                    self._len_int_generated = True
+                                    return f"len_int({val})"
+                                # Float/Double literal - count decimal places
+                                if (
+                                    stripped.replace("f", "")
+                                    .replace("F", "")
+                                    .replace(".", "")
+                                    .isdigit()
+                                ):
+                                    # Count decimal places
+                                    if "." in stripped:
+                                        decimal_places = len(
+                                            stripped.split(".")[1].rstrip("fF")
+                                        )
+                                        return str(decimal_places)
+                                    else:
+                                        return "0"  # No decimal places for integers
 
                         # Handle negative integer: len(-456)
                         if (
@@ -379,7 +403,13 @@ class CodeGen:
                             and isinstance(arg.operand, Literal)
                         ):
                             val = arg.operand.value
-                            if isinstance(val, str) and val.lstrip("-").isdigit():
+                            if (
+                                isinstance(val, str)
+                                and val.lstrip("-")
+                                .replace("L", "")
+                                .replace("U", "")
+                                .isdigit()
+                            ):
                                 self._len_int_generated = True
                                 return f"len_int(-{val})"
 
