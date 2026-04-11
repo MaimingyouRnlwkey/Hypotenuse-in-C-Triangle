@@ -76,6 +76,7 @@ class CodeGen:
         self._generated_dynam_funcs = set()  # Track generated helper functions
         self._helper_lines = []  # Store dynam helper functions
         self._dynam_declarations = {}  # Track dynam/string declarations by name -> type
+        self._len_int_generated = False  # Track if len_int helper has been generated
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
@@ -104,6 +105,26 @@ class CodeGen:
                 + rest
             )
             self._lines = new_lines
+
+        # Add len_int helper if needed for integer len() calls
+        if self._len_int_generated:
+            # Insert len_int helper after stdlib.h include
+            len_int_helper = [
+                "",
+                "int len_int(int x) {",
+                "    if (x == 0) return 1;",
+                "    int count = 0;",
+                "    if (x < 0) { x = -x; count = 1; }",
+                "    while (x > 0) { count++; x /= 10; }",
+                "    return count;",
+                "}",
+                "",
+            ]
+            # Find position after stdlib.h include
+            insert_pos = 2
+            self._lines = (
+                self._lines[:insert_pos] + len_int_helper + self._lines[insert_pos:]
+            )
 
         return "\n".join(self._lines)
 
@@ -279,18 +300,52 @@ class CodeGen:
                         # Complex object expression, fall back to regular handling
                         callee = self._expr(node.callee)
             else:
-                # Check if this is a call to len() function: len(arr)
+                # Check if this is a call to len() function: len(arr) or len("string") or len(123)
                 if isinstance(node.callee, Var) and node.callee.name == "len":
                     if len(node.args) == 1:
                         arg = node.args[0]
-                        # If the argument is a simple variable, check if it's a dynam array
+
+                        # Handle integer literal: len(123) or len(-456)
+                        if isinstance(arg, Literal):
+                            # Extract the numeric value
+                            val = arg.value
+                            if isinstance(val, str) and val.lstrip("-").isdigit():
+                                self._len_int_generated = True
+                                return f"len_int({val})"
+
+                        # Handle negative integer: len(-456)
+                        if (
+                            isinstance(arg, Unary)
+                            and arg.op == "-"
+                            and isinstance(arg.operand, Literal)
+                        ):
+                            val = arg.operand.value
+                            if isinstance(val, str) and val.lstrip("-").isdigit():
+                                self._len_int_generated = True
+                                return f"len_int(-{val})"
+
+                        # Handle regular variable - check if it's a dynam array or C array
                         if isinstance(arg, Var):
                             var_name = arg.name
-                            # For now, we'll assume it's an int dynam array
-                            # In a full implementation, we'd check the symbol table
-                            elem_type = "int"  # TODO: Get actual type from symbol table
-                            struct_name = f"dynam_{elem_type}"
-                            return f"{struct_name}_len(&{var_name})"
+                            # Check if this is a dynam array by checking our tracking dict
+                            if var_name in self._dynam_declarations:
+                                dyn_type = self._dynam_declarations[var_name]
+                                if dyn_type.startswith("dynam "):
+                                    elem_type = dyn_type[6:]
+                                    struct_name = f"dynam_{elem_type}"
+                                    return f"{struct_name}_len(&{var_name})"
+                                elif dyn_type == "string":
+                                    return f"strlen({var_name})"
+
+                            # For regular C arrays, we'd need symbol table info
+                            # For now, try to use sizeof approach: sizeof(arr)/sizeof(arr[0])
+                            # This works for static arrays
+                            # Generate: sizeof(var)/sizeof(var[0])
+                            return f"(int)(sizeof({var_name})/sizeof({var_name}[0]))"
+
+                        # Handle other expressions - default to strlen for strings
+                        arg_expr = self._expr(arg)
+                        return f"strlen({arg_expr})"
 
                 # Regular function call
                 callee = (
