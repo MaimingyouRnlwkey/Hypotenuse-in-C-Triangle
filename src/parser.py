@@ -998,7 +998,9 @@ class Parser:
                 # Build source string from parts
                 source = "&".join(scope_parts)
                 alias = self._parse_optional_alias()
-                self.expect("SEMICOLON")
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
                 return UsingDecl(item=None, source=source, alias=alias)
 
         # Check if we're importing a specific item (identifier before "from")
@@ -1012,27 +1014,35 @@ class Parser:
                 self.expect("FROM")
                 source = self._parse_import_source()
                 alias = self._parse_optional_alias()
-                self.expect("SEMICOLON")
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
                 return UsingDecl(item=item, source=source, alias=alias)
             elif next_tok and next_tok[0] == "AS":
                 # Direct import with alias: using "x" as y
                 source = self.advance()[1]
                 alias = self._parse_optional_alias()
-                self.expect("SEMICOLON")
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
                 return UsingDecl(item=None, source=source, alias=alias)
 
         # Check for string literal (import all from local)
         if t[0] == "STRING_LITERAL":
             source = self.advance()[1].strip('"')
             alias = self._parse_optional_alias()
-            self.expect("SEMICOLON")
+            # Semicolon is optional for using statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
             return UsingDecl(item=None, source=source, alias=alias)
 
         # Check for system lib <x>
         if t[0] == "LT":
             source = self._parse_import_source()
             alias = self._parse_optional_alias()
-            self.expect("SEMICOLON")
+            # Semicolon is optional for using statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
             return UsingDecl(item=None, source=source, alias=alias)
 
         line = t[2] if len(t) > 2 else 0

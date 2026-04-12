@@ -1,0 +1,10 @@
+#include <stdio.h>
+using printd from <plstd>
+
+int main() {
+    printd("Hello %s!\n", "world");
+    printd("Number: %d\n", 42);
+    printd("Float: %f\n", 3.14);
+    printd("Hex: %x\n", 255);
+    return 0;
+}
