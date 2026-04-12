@@ -4,40 +4,40 @@
   <img src="../assets/logo.png" alt="C△ Logo" width="120"/>
 </p>
 
-This document lists all keywords in C△, their purpose, and basic usage. Keywords marked "_Removed_" are **deprecated** from C11 and will cause a compiler error if used.
+This document lists all keywords in C△, their purpose, and basic usage. Keywords marked "_future_" are planned but not yet implemented.
 
 ---
 
 ## Type Keywords
 
-| Keyword    | Description                      |
-| ---------- | -------------------------------- |
-| `int`      | Signed integer                   |
-| `char`     | Single character / byte          |
-| `float`    | Single-precision float           |
-| `double`   | Double-precision float           |
-| `void`     | No type / no return              |
-| `short`    | Short integer                    |
-| `long`     | Long integer                     |
-| `signed`   | Explicitly signed integer        |
-| `unsigned` | Unsigned integer                 |
-| `string`   | _NEW_ First-class string type    |
-| `auto`     | _NEW_ Dynamic / inferred type    |
-| `dynam`    | _NEW_ Dynamic array              |
-| `tuple`    | _NEW_ Dynamic heterogeneous list |
+| Keyword    | Description                         |
+| ---------- | ----------------------------------- |
+| `int`      | Signed integer                      |
+| `char`     | Single character / byte             |
+| `float`    | Single-precision float              |
+| `double`   | Double-precision float              |
+| `void`     | No type / no return                 |
+| `short`    | Short integer                       |
+| `long`     | Long integer                        |
+| `signed`   | Explicitly signed integer           |
+| `unsigned` | Unsigned integer                    |
+| `string`   | _future_ First-class string type    |
+| `auto`     | _future_ Dynamic / inferred type    |
+| `dynam`    | _future_ Dynamic array              |
+| `tuple`    | _future_ Dynamic heterogeneous list |
 
 ---
 
 ## Structure Keywords
 
-| Keyword   | Description                         |
-| --------- | ----------------------------------- |
-| `struct`  | Plain struct (no inheritance)       |
-| `space`   | _NEW_ Library namespace declaration |
-| `typed`   | Typed struct (with inheritance)     |
-| `typedef` | C11 type alias                      |
-| `union`   | C11 union                           |
-| `enum`    | C11 enumeration                     |
+| Keyword   | Description                              |
+| --------- | ---------------------------------------- |
+| `struct`  | Plain struct (no inheritance)            |
+| `space`   | _NEW_ Library namespace declaration      |
+| `typed`   | _future_ Typed struct (with inheritance) |
+| `typedef` | C11 type alias                           |
+| `union`   | C11 union                                |
+| `enum`    | C11 enumeration                          |
 
 ---
 
@@ -72,8 +72,8 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | Keyword     | Description                               |
 | ----------- | ----------------------------------------- |
 | `using`     | _NEW_ Import a symbol from a library      |
-| `show`      | _NEW_ Globalize a library or namespace    |
-| `lib:`      | _NEW_ Explicit plstd access prefix        |
+| `expose`    | _NEW_ Globalize a library or namespace    |
+| `lib@`      | _NEW_ Explicit plstd access prefix        |
 | `overwrite` | overwrite base syntax with library syntax |
 
 ---
@@ -83,7 +83,7 @@ This document lists all keywords in C△, their purpose, and basic usage. Keywor
 | Keyword    | Description                                 |
 | ---------- | ------------------------------------------- |
 | `asm`      | _NEW_ Inline assembly block                 |
-| `lamb`     | _NEW_ Named lambda                          |
+| `lamb`     | _future_ Named lambda                       |
 | `self`     | _NEW_ Optional struct self-reference        |
 | `init`     | _NEW_ Struct constructor lifecycle function |
 | `end`      | _NEW_ Struct destructor lifecycle function  |
@@ -104,7 +104,7 @@ These C11 keywords are **not supported** in C△ and will raise a `SyntaxError`:
 | Keyword                | Reason                     |
 | ---------------------- | -------------------------- |
 | `auto` _(C11 meaning)_ | Repurposed as dynamic type |
-| `restrict`             | _Removed_                  |
-| `_Bool`                | _Removed_                  |
-| `_Complex`             | _Removed_                  |
-| `_Imaginary`           | _Removed_                  |
+| `restrict`             | _REMOVED_                  |
+| `_Bool`                | _REMOVED_                  |
+| `_Complex`             | _REMOVED_                  |
+| `_Imaginary`           | _REMOVED_                  |

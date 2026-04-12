@@ -1,0 +1,7 @@
+int main() {
+    dynam char arr = ['a', 'b', 'c'];
+    arr.push('d');
+    char x = arr.pop();
+    int len = arr.len();
+    return 0;
+}

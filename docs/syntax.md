@@ -45,28 +45,26 @@ int t_len = len(t);    // t_len = 3
 ## Imports
 
 ```c
-// Import a specific symbol from a system library
-// Import an entire plib (project-specific library)
+// Import all from a system library (PLIBS/)
 using <plstd>
 
-// Import a specific symbol from a system library
-using random from <math>
+// Import specific function from a system library
+using printd from <plstd>
 
 // Import from a local library
 using helper from "utils"
 
 // Globalize an entire library (all symbols in scope)
-show plstd
+expose plstd
 
-// Globalize one module from plstd
-show lib:io
+// Globalize a specific namespace from a library
+expose io@plstd;
+
+// Explicit access - function@namespace syntax
+printd@lib("value: %d\n", 42);
 
 // Intra-file immutable reference
 using scope&myVar
-
-// overwrite of syntax
-overwrite(int, lib:int)
-overwrite(base, examplelib) // overwriting base keywords with examplelib keywords.
 ```
 
 > The compiler auto-imports what is used — manual `using` is optional style.
@@ -267,10 +265,10 @@ See [assembly.md](assembly.md) for full details.
 ## Namespace Access
 
 ```c
-// Access a namespace member with ':'
-myspace:random()
+// Access a namespace member with '@'
+random@mySpace()
 
 // Globalize a namespace
-show myspace
+expose mySpace
 random()   // now accessible directly
 ```

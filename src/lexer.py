@@ -31,6 +31,8 @@ Tokens = [
     ("SIGNED", re.compile(r"\bsigned\b")),
     ("UNSIGNED", re.compile(r"\bunsigned\b")),
     ("SIZE_T", re.compile(r"\bsize_t\b")),
+    ("DYNAM", re.compile(r"\bdynam\b")),
+    ("STRING", re.compile(r"\bstring\b")),
     ("STRUCT", re.compile(r"\bstruct\b")),
     ("UNION", re.compile(r"\bunion\b")),
     ("ENUM", re.compile(r"\benum\b")),
@@ -51,6 +53,12 @@ Tokens = [
     ("UNDERSCORE_ALIGNAS", re.compile(r"\b_Alignas\b")),
     ("UNDERSCORE_COMPLEX", re.compile(r"\b_Complex\b")),
     ("UNDERSCORE_IMAGINARY", re.compile(r"\b_Imaginary\b")),
+    # C△ IMPORT KEYWORDS
+    ("USING", re.compile(r"\busing\b")),
+    ("FROM", re.compile(r"\bfrom\b")),
+    ("EXPOSE", re.compile(r"\bexpose\b")),
+    ("SPACE", re.compile(r"\bspace\b")),
+    ("AS", re.compile(r"\bas\b")),
     # DATA TYPES
     ("STRING_LITERAL", re.compile(r'"(?:\\.|[^"\\])*"')),
     ("CHAR_LITERAL", re.compile(r"'(?:\\.|[^'\\])*'")),
@@ -96,14 +104,17 @@ Tokens = [
     ("OR", re.compile(r"\|\|")),
     ("BITWISE_OR", re.compile(r"\|")),  # must come after OR (||)
     ("BITWISE_XOR", re.compile(r"\^")),
-    ("BITWISE_NOT", re.compile(r"~")),
     ("AMPERSAND", re.compile(r"&")),  # must come after AND (&&)
+    ("AT", re.compile(r"@")),  # namespace separator
+    ("TILDE", re.compile(r"~")),  # bitwise NOT
     ("ELLIPSIS", re.compile(r"\.\.\.")),  # must come before DOT
     ("DOT", re.compile(r"\.")),
     ("LBRACKET", re.compile(r"\[")),
     ("RBRACKET", re.compile(r"]")),
     ("LBRACE", re.compile(r"\{")),
     ("RBRACE", re.compile(r"}")),
+    ("LIB", re.compile(r"\blib\b")),
+    ("PLSTD", re.compile(r"\bplstd\b")),
     # IDENTIFIERS
     ("IDENTIFIER", re.compile(r"[A-Za-z_][A-Za-z0-9_]*")),
     # OTHERS

@@ -1,0 +1,3 @@
+space test {
+void foo() { }
+}

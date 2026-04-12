@@ -5,6 +5,12 @@
 BASELINE := $(CURDIR)/test/baseline.ctri
 RETURNS := $(CURDIR)/test/function_returns.ctri
 
+# New feature test files
+DYNAM := $(CURDIR)/test/test_dynam.ctri
+STRING := $(CURDIR)/test/test_string.ctri
+STRING_CONCAT := $(CURDIR)/test/test_string_concat.ctri
+LEN_TEST := $(CURDIR)/test/test_len.ctri
+
 # ---------------------------------------------------------------
 # install: install all Python dependencies needed to test/lint
 # ---------------------------------------------------------------
@@ -35,6 +41,14 @@ typecheck:
 	@python3 src/main.py -t "$(BASELINE)" || (echo "FAILED: baseline.ctri" && exit 1)
 	@echo "  Checking: $(RETURNS)"
 	@python3 src/main.py -t "$(RETURNS)" || (echo "FAILED: function_returns.ctri" && exit 1)
+	@echo "  Checking: $(DYNAM)"
+	@python3 src/main.py -t "$(DYNAM)" || (echo "FAILED: test_dynam.ctri" && exit 1)
+	@echo "  Checking: $(STRING)"
+	@python3 src/main.py -t "$(STRING)" || (echo "FAILED: test_string.ctri" && exit 1)
+	@echo "  Checking: $(STRING_CONCAT)"
+	@python3 src/main.py -t "$(STRING_CONCAT)" || (echo "FAILED: test_string_concat.ctri" && exit 1)
+	@echo "  Checking: $(LEN_TEST)"
+	@python3 src/main.py -t "$(LEN_TEST)" || (echo "FAILED: test_len.ctri" && exit 1)
 	@echo "--- All inputs passed ---"
 
 # ---------------------------------------------------------------
@@ -129,18 +143,26 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 # ---------------------------------------------------------------
-# full-install: install the binary to system (requires sudo or ~/.local/bin)
+# full-install: install the binary to system and set up PLIBS folder
 # ---------------------------------------------------------------
 full-install: build
 	@if [ -w /usr/local/bin ]; then \
 		cp dist/hypotenuse /usr/local/bin/hypotenuse; \
 		chmod +x /usr/local/bin/hypotenuse; \
 		echo "Installed to /usr/local/bin/hypotenuse"; \
+		sudo mkdir -p /usr/lib/PLIBS/plstd; \
+		echo "Created /usr/lib/PLIBS/plstd"; \
+		sudo cp -r plstd/* /usr/lib/PLIBS/plstd/; \
+		echo "Copied plstd contents to /usr/lib/PLIBS/plstd"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
 		chmod +x ~/.local/bin/hypotenuse; \
 		echo "Installed to ~/.local/bin/hypotenuse"; \
+		mkdir -p ~/.local/lib/PLIBS/plstd; \
+		echo "Created ~/.local/lib/PLIBS/plstd"; \
+		cp -r plstd/* ~/.local/lib/PLIBS/plstd/; \
+		echo "Copied plstd contents to ~/.local/lib/PLIBS/plstd"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 

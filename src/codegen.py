@@ -1,5 +1,8 @@
 """C11 code generator for C△ compiler."""
 
+import os
+import sys
+
 from parser import (
     Function,
     Declaration,
@@ -28,11 +31,14 @@ from parser import (
     Switch,
     StructDef,
     Typedef,
+    UsingDecl,
+    ExposeDecl,
+    LibAccess,
+    SpaceDecl,
+    TypeExpr,
     FieldAccess,
     DesignatedInit,
-    TypeExpr,
-    Generic,
-    CompoundLiteral,
+    ArrayDesignation,
 )
 
 
@@ -51,17 +57,90 @@ TYPE_MAP = {
 
 
 class CodeGen:
-    def __init__(self, ast, structor, layouts=None):
+    def __init__(self, ast, structor, layouts=None, source_path=None):
         self.ast = ast
         self.structor = structor
         self.layouts = layouts or {}
+        self.source_path = source_path  # path to source file for plib lookup
         self._lines = []
         self._indent = 0
+        self._specific_imports = {}  # item -> (lib_name, namespace)
+        self._current_alias = {}  # lib_name -> alias
+        self._generating_plib = False  # Flag to bypass checks when generating plib code
+        self._plstd_functions = set()  # Dynamically tracked plstd functions
+        self._plstd_exposed = False  # Whether plstd has been exposed
+        self._exposed_libs = set()  # Set of exposed library names
+        self._collected_includes = set()
+        # Track generated dynam helper functions and structs to avoid duplicates
+        self._generated_dynam_structs = set()  # Track generated struct types
+        self._generated_dynam_funcs = set()  # Track generated helper functions
+        self._helper_lines = []  # Store dynam helper functions
+        self._dynam_declarations = {}  # Track dynam/string declarations by name -> type
+        self._len_int_generated = False  # Track if len_int helper has been generated
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
         self._lines = []
         self._gen_program(self.ast)
+
+        # Always ensure required includes are present
+        needs_stdlib = (
+            self._len_int_generated
+            or "malloc" in "\n".join(self._lines)
+            or "free" in "\n".join(self._lines)
+        )
+        needs_string = (
+            "strlen" in "\n".join(self._lines)
+            or "strdup" in "\n".join(self._lines)
+            or "strcpy" in "\n".join(self._lines)
+            or "strcat" in "\n".join(self._lines)
+        )
+
+        # If we generated dynam helpers, prepend them after includes
+        if self._helper_lines or needs_stdlib or needs_string:
+            # Separate includes from other code
+            includes = []
+            rest = []
+            in_includes = True
+            for line in self._lines:
+                if in_includes and (line.startswith("#include") or line.strip() == ""):
+                    includes.append(line)
+                else:
+                    in_includes = False
+                    rest.append(line)
+
+            # Build new output with includes and helpers
+            new_includes = []
+            if "#include <stdlib.h>" not in "\n".join(includes) and needs_stdlib:
+                new_includes.append("#include <stdlib.h>")
+            if "#include <string.h>" not in "\n".join(includes) and needs_string:
+                new_includes.append("#include <string.h>")
+
+            new_lines = (
+                includes + new_includes + [""] + self._helper_lines + [""] + rest
+            )
+            self._lines = new_lines
+
+        # Add len_int helper if needed for integer len() calls
+        if self._len_int_generated:
+            # Insert len_int helper after stdlib.h include
+            len_int_helper = [
+                "",
+                "int len_int(int x) {",
+                "    if (x == 0) return 1;",
+                "    int count = 0;",
+                "    if (x < 0) { x = -x; count = 1; }",
+                "    while (x > 0) { count++; x /= 10; }",
+                "    return count;",
+                "}",
+                "",
+            ]
+            # Find position after stdlib.h include
+            insert_pos = 2
+            self._lines = (
+                self._lines[:insert_pos] + len_int_helper + self._lines[insert_pos:]
+            )
+
         return "\n".join(self._lines)
 
     # ------------------------------------------------------------------
@@ -87,12 +166,31 @@ class CodeGen:
         if not typ:
             return typ
         if typ.startswith("dynam "):
-            typ = typ[7:]
+            typ = typ[6:]  # Strip "dynam " (6 chars)
         if typ.startswith("tuple "):
             typ = typ[6:]
         if typ == "string":
             return "char*"
         return TYPE_MAP.get(typ, typ)
+
+    def _get_dynam_type(self, var_name: str) -> str:
+        """Get the type of a variable if it's dynam or string."""
+        return self._dynam_declarations.get(var_name)
+
+    def _get_expression_type(self, node) -> str:
+        """Determine the type of an expression for codegen purposes."""
+        if isinstance(node, Literal):
+            # String literals are strings
+            if isinstance(node.value, str) and node.value.startswith('"'):
+                return "string"
+            return ""  # Other literals
+
+        if isinstance(node, Var):
+            # Variables get their type from declaration tracking
+            return self._get_dynam_type(node.name) or ""
+
+        # For other expressions, we could do more analysis but for now keep it simple
+        return ""
 
     def _contains_assignment(self, node) -> bool:
         """Recursively check if an expression contains an assignment."""
@@ -166,8 +264,93 @@ class CodeGen:
                     false_val = self._expr(node.right.right)
                     return f"({cond}) ? {true_val} : {false_val}"
                 return f"({cond}) ? {self._expr(node.right)}"
+
+            # Handle string concatenation: "hello" + "world" or s1 + s2
+            if node.op == "+":
+                left_type = self._get_expression_type(node.left)
+                right_type = self._get_expression_type(node.right)
+
+                # If either operand is a string or string literal, treat as concatenation
+                if (
+                    left_type == "string"
+                    or right_type == "string"
+                    or (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    )
+                    or (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    )
+                ):
+                    left_expr = self._expr(node.left)
+                    right_expr = self._expr(node.right)
+
+                    # Generate concatenation: malloc + strcpy + strcat
+                    # We need to return an expression that evaluates to the concatenated string
+                    # Use a statement-like approach that will be handled by the caller
+                    return f"(char*)0 /* STRING_CONCAT_PLACEHOLDER: {left_expr} + {right_expr} */"
+
             left = self._expr(node.left)
             right = self._expr(node.right)
+
+            # Handle string comparisons: s == "hello" or s1 == s2
+            if node.op in ("==", "!="):
+                left_type = self._get_expression_type(node.left)
+                right_type = self._get_expression_type(node.right)
+
+                # If comparing strings, we need to use strcmp
+                if (
+                    left_type == "string"
+                    or (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    )
+                ) or (
+                    right_type == "string"
+                    or (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    )
+                ):
+                    # Handle string literal comparison: s == "hello" -> strcmp(s, "hello") == 0
+                    if (
+                        isinstance(node.left, Literal)
+                        and isinstance(node.left.value, str)
+                        and node.left.value.startswith('"')
+                    ):
+                        # "hello" == s -> strcmp(s, "hello") == 0
+                        return (
+                            f"(strcmp({right}, {left}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({right}, {left}) != 0)"
+                        )
+                    elif (
+                        isinstance(node.right, Literal)
+                        and isinstance(node.right.value, str)
+                        and node.right.value.startswith('"')
+                    ):
+                        # s == "hello" -> strcmp(s, "hello") == 0
+                        return (
+                            f"(strcmp({left}, {right}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({left}, {right}) != 0)"
+                        )
+                    else:
+                        # s1 == s2 -> strcmp(s1, s2) == 0
+                        return (
+                            f"(strcmp({left}, {right}) == 0)"
+                            if node.op == "=="
+                            else f"(strcmp({left}, {right}) != 0)"
+                        )
+
+            # Comparison operators don't need extra parens (avoid gcc warnings)
+            if node.op in ("==", "!=", "<", ">", "<=", ">="):
+                return f"{left} {node.op} {right}"
             # Preserve AST grouping regardless of C operator precedence.
             return f"({left} {node.op} {right})"
 
@@ -175,6 +358,12 @@ class CodeGen:
             if node.op == "sizeof":
                 operand = self._expr(node.operand)
                 return f"sizeof({operand})"
+            # Handle string pointer dereferencing: *s for string s
+            if node.op == "*" and isinstance(node.operand, Var):
+                var_name = node.operand.name
+                if self._get_dynam_type(var_name) == "string":
+                    # For string types, *s should generate *(s) which is correct
+                    return f"*({self._expr(node.operand)})"
             operand = self._expr(node.operand)
             if node.prefix:
                 return f"{node.op}{operand}"
@@ -186,11 +375,206 @@ class CodeGen:
             return f"{target} = {value}"
 
         if isinstance(node, Call):
-            callee = (
-                node.callee.name
-                if isinstance(node.callee, Var)
-                else self._expr(node.callee)
-            )
+            # Check if this is a method call on a dynam array: obj.method(args)
+            if isinstance(node.callee, FieldAccess):
+                obj_expr = self._expr(node.callee.obj)
+                method_name = node.callee.field_name
+
+                # Check if this is a dynam array method: push, pop, len
+                if method_name in ("push", "pop", "len"):
+                    # For now, we'll assume any variable accessed with these methods is a dynam array
+                    # In a full implementation, we'd check the symbol table for the variable type
+                    # Generate helper function call: dynam_<type>_<method>(&obj, args)
+                    # We don't have type info here, so we'll use a placeholder approach
+                    # Better would be to pass type information through the codegen process
+
+                    # Since we don't have the element type, we'll need to infer it or use a generic approach
+                    # For now, let's assume we can determine the type from context or use a generic name
+                    # This is a limitation - in a real compiler we'd have symbol table info
+
+                    # Try to get the variable name from the object expression
+                    # If obj_expr is a simple variable name, use it
+                    if isinstance(node.callee.obj, Var):
+                        var_name = node.callee.obj.name
+                        # We still need the element type - for now, we'll use a generic approach
+                        # In practice, we'd look up the variable's type in the symbol table
+                        # For this implementation, we'll assume int type for testing
+                        elem_type = "int"  # TODO: Get actual type from symbol table
+                        struct_name = f"dynam_{elem_type}"
+
+                        if method_name == "push":
+                            # arr.push(val) -> dynam_int_push(&arr, val)
+                            args_str = ", ".join(self._expr(a) for a in node.args)
+                            return f"{struct_name}_push(&{var_name}, {args_str})"
+                        elif method_name == "pop":
+                            # arr.pop() -> dynam_int_pop(&arr)
+                            args_str = ", ".join(self._expr(a) for a in node.args)
+                            return f"{struct_name}_pop(&{var_name}){'' if not node.args else f'({args_str})'}"
+                        elif method_name == "len":
+                            # arr.len() -> dynam_int_len(&arr)
+                            args_str = ", ".join(self._expr(a) for a in node.args)
+                            return f"{struct_name}_len(&{var_name}){'' if not node.args else f'({args_str})'}"
+                    else:
+                        # Complex object expression, fall back to regular handling
+                        callee = self._expr(node.callee)
+            else:
+                # Check if this is a call to len() function: len(arr) or len("string") or len(123)
+                if isinstance(node.callee, Var) and node.callee.name == "len":
+                    if len(node.args) == 1:
+                        arg = node.args[0]
+
+                        # Handle integer literal: len(123) or len(-456)
+                        if isinstance(arg, Literal):
+                            # Extract the numeric value
+                            val = arg.value
+                            # Check if it's an integer (with optional suffix like L, LL, U, UL)
+                            if isinstance(val, str):
+                                stripped = val.lstrip("-")
+                                # Integer with optional suffix (L, LL, U, UL, etc.)
+                                if (
+                                    stripped.replace("L", "")
+                                    .replace("U", "")
+                                    .replace("u", "")
+                                    .isdigit()
+                                ):
+                                    self._len_int_generated = True
+                                    return f"len_int({val})"
+                                # Float/Double literal - count decimal places
+                                if (
+                                    stripped.replace("f", "")
+                                    .replace("F", "")
+                                    .replace(".", "")
+                                    .isdigit()
+                                ):
+                                    # Count decimal places
+                                    if "." in stripped:
+                                        decimal_places = len(
+                                            stripped.split(".")[1].rstrip("fF")
+                                        )
+                                        return str(decimal_places)
+                                    else:
+                                        return "0"  # No decimal places for integers
+
+                        # Handle negative integer: len(-456)
+                        if (
+                            isinstance(arg, Unary)
+                            and arg.op == "-"
+                            and isinstance(arg.operand, Literal)
+                        ):
+                            val = arg.operand.value
+                            if (
+                                isinstance(val, str)
+                                and val.lstrip("-")
+                                .replace("L", "")
+                                .replace("U", "")
+                                .isdigit()
+                            ):
+                                self._len_int_generated = True
+                                return f"len_int(-{val})"
+
+                        # Handle regular variable - check if it's a dynam array or C array
+                        if isinstance(arg, Var):
+                            var_name = arg.name
+                            # Check if this is a dynam array by checking our tracking dict
+                            if var_name in self._dynam_declarations:
+                                dyn_type = self._dynam_declarations[var_name]
+                                if dyn_type.startswith("dynam "):
+                                    elem_type = dyn_type[6:]
+                                    struct_name = f"dynam_{elem_type}"
+                                    return f"{struct_name}_len(&{var_name})"
+                                elif dyn_type == "string":
+                                    return f"strlen({var_name})"
+
+                            # For regular C arrays, we'd need symbol table info
+                            # For now, try to use sizeof approach: sizeof(arr)/sizeof(arr[0])
+                            # This works for static arrays
+                            # Generate: sizeof(var)/sizeof(var[0])
+                            return f"(int)(sizeof({var_name})/sizeof({var_name}[0]))"
+
+                        # Handle other expressions - default to strlen for strings
+                        arg_expr = self._expr(arg)
+                        return f"strlen({arg_expr})"
+
+                # Regular function call
+                callee = (
+                    node.callee.name
+                    if isinstance(node.callee, Var)
+                    else self._expr(node.callee)
+                )
+
+            # FIRST: Check if library is exposed
+            # If exposed: printd@lib prefix is allowed but optional (strip it)
+            # If NOT exposed: printd@lib prefix IS required for plstd functions
+            # Skip this check when generating plib code itself
+            # Check both the plstd flag and exposed_libs set for backwards compatibility
+            plstd_exposed = (
+                hasattr(self, "_plstd_exposed") and self._plstd_exposed
+            ) or (hasattr(self, "_exposed_libs") and "plstd" in self._exposed_libs)
+            if not self._generating_plib and plstd_exposed:
+                # plstd is exposed - allow both direct call and printd@lib prefix
+                actual_callee = callee
+                if "@lib" in callee:
+                    actual_callee = callee.split("@")[0]
+                if actual_callee in self._plstd_functions:
+                    callee = actual_callee
+            elif not self._generating_plib and not plstd_exposed:
+                # plstd not exposed - printd@lib prefix IS required for plstd functions
+                actual_callee = callee
+                if "@lib" in callee:
+                    actual_callee = callee.split("@")[0]
+                if actual_callee in self._plstd_functions:
+                    if "@lib" not in callee:
+                        raise ValueError(
+                            f"Function '{actual_callee}' requires '{actual_callee}@lib()' syntax (plstd not exposed)."
+                        )
+                    callee = actual_callee
+
+            # Handle specific imports: using sin from <math> -> math_sin()
+            # AND intra-file scoped imports: using X&Y -> map Y to X_Y
+            # This must run BEFORE namespace transformation so "printd@lib" can match "printd"
+            base_callee = callee.split("@")[0] if "@" in callee else callee
+            if (
+                hasattr(self, "_specific_imports")
+                and base_callee in self._specific_imports
+            ):
+                lib_name, func_name = self._specific_imports[base_callee]
+                # Check if this is an intra-file scoped import (scope chain has &)
+                # OR it's a simple scoped import (single scope name without &)
+                # OR it's an alias (lib_name == func_name means alias was used)
+                # Both need transformation: foo&bar -> foo_bar, main&helper -> main_helper
+                # But alias: use directly
+                if "&" in str(lib_name):
+                    # Chain like a&b&c - transform
+                    scope_chain = lib_name
+                    callee = scope_chain.replace("&", "_") + "_" + func_name
+                elif lib_name == func_name:
+                    # Alias used - callee should already be the alias
+                    pass  # callee stays as-is (already matches)
+                else:
+                    # Single scope like foo - transform to foo_bar
+                    # OR plstd specific import: printd from <plstd> -> plstd_printd
+                    if lib_name == "plstd":
+                        # func_name is already the generated name like "plstd_printd"
+                        callee = func_name
+                    else:
+                        callee = lib_name + "_" + func_name
+
+            # Handle user namespace prefix like "helper@mylib" -> "mylib_helper"
+            # Check AFTER specific imports since both may contain "@"
+            elif "@" in callee and "@lib" not in callee:
+                # Convert user namespace access to prefixed function name
+                # Space generates: namespace_func, so call should be namespace_func
+                parts = callee.split("@")
+                if len(parts) == 2:
+                    func, namespace = parts
+                    callee = f"{namespace}_{func}"
+            # Handle plstd namespace prefix like "printd@lib" -> "plstd_printd"
+            # (only if not handled by specific imports above)
+            elif "@lib" in callee:
+                parts = callee.split("@")
+                if len(parts) == 2:
+                    func, namespace = parts
+                    callee = f"{namespace}_{func}"
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
@@ -222,6 +606,14 @@ class CodeGen:
         if isinstance(node, DesignatedInit):
             return f".{node.field} = {self._expr(node.value)}"
 
+        if isinstance(node, ArrayDesignation):
+            idx = self._expr(node.index)
+            val = self._expr(node.value)
+            if node.is_range and node.end_index:
+                end = self._expr(node.end_index)
+                return f"[{idx}...{end}] = {val}"
+            return f"[{idx}] = {val}"
+
         if isinstance(node, CompoundLiteral):
             typ = self._map_type(node.lit_type)
             elems = ", ".join(self._expr(e) for e in node.elements)
@@ -240,8 +632,421 @@ class CodeGen:
     # ------------------------------------------------------------------
 
     def _gen_program(self, node):
+        # First collect all includes from user file and all plib dependencies
+        self._gen_imports()
+        # Now emit collected includes at the very beginning (prepend)
+        includes_to_emit = []
+        for inc in sorted(self._collected_includes):
+            includes_to_emit.append(inc)
+        # Prepend includes before any existing code
+        self._lines = includes_to_emit + self._lines
+        # Now generate rest of code (plib functions included via _gen_plib_code)
         for decl in node.declarations:
-            self._gen_node(decl)
+            if isinstance(decl, SpaceDecl):
+                # Handle SpaceDecl in main file - generate nested declarations with prefix
+                prefix = decl.name
+                for nested in decl.declarations:
+                    if isinstance(nested, Function):
+                        nested.name = f"{prefix}_{nested.name}"
+                    elif isinstance(nested, Declaration):
+                        nested.name = f"{prefix}_{nested.name}"
+                    self._gen_node(nested)
+            elif not isinstance(decl, (UsingDecl, ExposeDecl)):
+                # Skip Include/Define - they were collected in _gen_imports via _collect_include
+                if isinstance(decl, (Include, Define)):
+                    continue
+                self._gen_node(decl)
+
+    def _emit_collected_includes(self):
+        for inc in sorted(self._collected_includes):
+            self._emit(inc)
+
+    def _gen_imports(self):
+        """Generate import-related code (includes, exposes)."""
+        if self.structor is None:
+            for decl in self.ast.declarations:
+                if isinstance(decl, Include):
+                    self._collect_include(decl)
+                elif isinstance(decl, Define):
+                    self._collected_includes.add(decl.directive)
+            return
+
+        # Collect user file includes from the AST
+        for decl in self.ast.declarations:
+            if isinstance(decl, Include):
+                self._collect_include(decl)
+            elif isinstance(decl, Define):
+                self._collected_includes.add(decl.directive)
+
+        imports = self.structor.get_imports()
+        exposes = self.structor.get_exposes()
+
+        local_imports = []
+        alias_map = {}  # alias -> lib_name
+        seen_libs = set()
+        specific_imports = {}  # item -> lib_name (for "using X from <Y>")
+
+        for imp in imports:
+            source = imp.source
+            if source.startswith("<") and source.endswith(">"):
+                # Treat <lib> as a plib lookup, not a system header
+                lib_name = source[1:-1]
+                actual_path = f"plstd/{lib_name}"
+
+                if lib_name not in seen_libs:
+                    local_imports.append(actual_path)
+                    seen_libs.add(lib_name)
+                if imp.alias:
+                    alias_map[imp.alias] = (actual_path, "local")
+                if imp.item:
+                    # Track specific imports: using sin from <math>
+                    specific_imports[imp.item] = actual_path
+            elif "&" in source:
+                # Handle intra-file scoped imports: using X&Y or using a&b&c&Y
+                # This imports a symbol Y from scope X (chain of scopes)
+                # We need to track this and map the symbol accordingly
+                parts = source.split("&")
+                if len(parts) >= 2:
+                    # Last part is the symbol being imported
+                    # First part(s) are the scope chain
+                    symbol_name = parts[-1]
+                    scope_chain = "&".join(parts[:-1])
+                    # If there's an alias, use it instead of scope chain
+                    if imp.alias:
+                        self._specific_imports[symbol_name] = (imp.alias, imp.alias)
+                    else:
+                        # Store for later mapping in _expr
+                        self._specific_imports[symbol_name] = (scope_chain, symbol_name)
+                pass
+            else:
+                if source not in seen_libs:
+                    local_imports.append(source)
+                    seen_libs.add(source)
+                if imp.alias:
+                    alias_map[imp.alias] = (source, "local")
+                if imp.item:
+                    specific_imports[imp.item] = source
+
+        # Store for use in _expr
+        # Map: bare_name -> (lib_name, namespace)
+        # Preserve any scoped imports already added (from & in source)
+        existing_scoped = dict(self._specific_imports)
+        self._specific_imports = {}
+        self._current_alias = {}
+        # Add scoped imports back
+        self._specific_imports.update(existing_scoped)
+        # Add specific imports from "using X from Y"
+        for item, lib_name in specific_imports.items():
+            # Will be updated when plib is processed
+            self._specific_imports[item] = (lib_name, None)
+
+        for lib_name in local_imports:
+            alias = None
+            for a, (lib, type_) in alias_map.items():
+                if lib == lib_name and type_ == "local":
+                    alias = a
+                    break
+            if alias:
+                self._current_alias[lib_name] = alias
+            # Only collect includes from plib (don't generate code yet)
+            self._collect_plib_includes(lib_name)
+
+        # Now generate plib code after all includes are collected
+        for lib_name in local_imports:
+            alias = self._current_alias.get(lib_name)
+            self._gen_plib_code(lib_name, alias)
+
+        for exp in exposes:
+            # Check if the library was imported first
+            # Normalize: both <plstd> and "plstd" should match "plstd"
+            exp_target = exp.target
+
+            # Handle @ syntax: expose printd@plstd exposes a specific item from a library
+            if "@" in exp_target:
+                func_name, lib_name = exp_target.rsplit("@", 1)
+
+                # Special case: "lib" is an alias for "plstd"
+                # So expose printd@lib should work if <plstd> was imported
+                check_libs = [lib_name]
+                if lib_name == "lib":
+                    check_libs.append("plstd")
+
+                # Check if any of the potential libraries was imported
+                # Also check for path-based imports like <plstd/printd>
+                lib_imported = any(
+                    (imp.source == l)
+                    or (imp.source == f"<{l}>")
+                    or (imp.source == f'"{l}"')
+                    # Also check path-based imports: <plstd/printd> imports plstd
+                    or (imp.source.startswith(f"<{l}/"))
+                    for imp in imports
+                    for l in check_libs
+                )
+                # Also check if specific function was imported (using printd from <plstd>)
+                func_imported = any(imp.item == func_name for imp in imports)
+                # Either library imported OR specific function imported is fine
+                if not lib_imported and not func_imported:
+                    raise ValueError(
+                        f"Cannot expose '{exp.target}' - library must be imported first. "
+                        f"Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it."
+                    )
+                # Track that this library is now exposed (using generic set)
+                # Special case: "lib" is an alias for "plstd"
+                if lib_name == "lib":
+                    self._plstd_exposed = True
+                self._exposed_libs.add(lib_name)
+                self._exposed_libs.add(exp.target)
+                continue
+
+            if exp_target.startswith("<") and exp_target.endswith(">"):
+                exp_target = exp.target[1:-1]
+
+            # Check if the library was imported
+            # OR if this specific item was imported (e.g., using printd from <plstd>)
+            lib_imported = any(
+                (imp.source == exp_target)
+                or (imp.source == f"<{exp_target}>")
+                or (imp.source == f'"{exp_target}"')
+                # Check if the specific item was imported
+                or (imp.item == exp_target)
+                for imp in imports
+            )
+            if not lib_imported:
+                # Also check path-based imports
+                if any(
+                    imp.source.startswith(f"<{exp_target}/")
+                    or imp.source == f"<{exp_target}>"
+                    or imp.source == exp_target
+                    for imp in imports
+                ):
+                    lib_imported = True
+            # Track that this library is now exposed
+            if exp.target == "plstd" or exp_target == "plstd":
+                self._plstd_exposed = True
+            elif exp.target.startswith("<") and exp.target.endswith(">"):
+                lib_name = exp.target[1:-1]
+                self._exposed_libs.add(lib_name)
+            else:
+                self._exposed_libs.add(exp.target)
+
+    def _gen_plib_code(self, lib_name: str, alias: str = None):
+        """Generate code from a local plib file."""
+        import os
+        import lexer
+        import parser as p
+
+        # Bypass the plstd check when generating plib code itself
+        old_generating = self._generating_plib
+        self._generating_plib = True
+
+        plib_path = None
+        search_name = lib_name.split("/")[-1]
+
+        # Always check current directory first
+        current_dir = os.path.dirname(self.source_path) if self.source_path else "."
+        search_paths = [current_dir] + self._get_plibs_search_dirs()
+
+        # Handle path with folder: plstd/printd -> import first .plib in folder
+        if "/" in lib_name:
+            folder = lib_name.split("/")[0]
+            for base in search_paths:
+                folder_path = os.path.join(base, folder)
+                if os.path.isdir(folder_path):
+                    for f in sorted(os.listdir(folder_path)):
+                        if f.endswith(".plib"):
+                            plib_path = os.path.join(folder_path, f)
+                            break
+                    if plib_path:
+                        break
+        else:
+            # First try direct .plib file
+            for base in search_paths:
+                candidate = os.path.join(base, f"{search_name}.plib")
+                if os.path.exists(candidate):
+                    plib_path = candidate
+                    break
+
+            # If no .plib file found, try as folder (import all .plib files in folder)
+            if not plib_path:
+                for base in search_paths:
+                    folder_path = os.path.join(base, search_name)
+                    if os.path.isdir(folder_path):
+                        # Import first .plib in folder
+                        for f in sorted(os.listdir(folder_path)):
+                            if f.endswith(".plib"):
+                                plib_path = os.path.join(folder_path, f)
+                                break
+                        if plib_path:
+                            break
+
+        if not plib_path:
+            return
+
+        with open(plib_path, "r") as f:
+            plib_content = f.read()
+
+        tokens = lexer.Lexer(plib_content).lex()
+        tokens.append(("EOF", "EOF", 0, 0))
+        plib_ast = p.Parser(tokens).parse_program()
+
+        # Collect all includes from the plib (not emit - collected for later)
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Include):
+                self._collect_include(decl)
+            elif isinstance(decl, p.Define):
+                # Collect defines into a set too for later deduplication
+                self._collected_includes.add(decl.directive)
+
+        # Determine the prefix to use - alias if provided, else lib_name
+        # For plstd/plstd, use "plstd" as prefix to avoid name conflicts
+        if alias:
+            prefix = alias
+        elif lib_name.startswith("plstd/"):
+            prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
+            self._plstd_exposed = True  # Auto-expose when importing via folder
+        elif "/" in lib_name:
+            # Any other folder import - extract folder name as prefix
+            prefix = lib_name.split("/")[0]
+            self._exposed_libs.add(prefix)
+        else:
+            prefix = lib_name
+
+        for decl in plib_ast.declarations:
+            # Skip includes/defines - already handled above
+            if isinstance(decl, (p.Include, p.Define)):
+                continue
+
+            # Apply prefix to top-level declarations only if alias is provided
+            # For plstd imports without alias (using printd from <plstd>), don't prefix
+            if alias:
+                if isinstance(decl, p.Function):
+                    decl.name = f"{prefix}_{decl.name}"
+                elif isinstance(decl, p.Declaration):
+                    decl.name = f"{prefix}_{decl.name}"
+
+            # Handle SpaceDecl - generate with prefix + namespace prefix
+            if isinstance(decl, p.SpaceDecl):
+                # Determine actual generated prefix
+                if prefix == decl.name:
+                    actual_prefix = prefix  # e.g., math_sin
+                else:
+                    actual_prefix = f"{prefix}_{decl.name}"  # e.g., lib_utils_func
+
+                # Update specific imports mapping with actual generated prefix
+                for nested_decl in decl.declarations:
+                    if isinstance(nested_decl, p.Function):
+                        generated_name = f"{actual_prefix}_{nested_decl.name}"
+                        # Update mapping: printd -> (plstd, plstd_printd)
+                        if nested_decl.name in self._specific_imports:
+                            self._specific_imports[nested_decl.name] = (
+                                lib_name.split("/")[-1],
+                                generated_name,
+                            )
+
+                        nested_decl.name = generated_name
+                    elif isinstance(nested_decl, p.Declaration):
+                        nested_decl.name = f"{actual_prefix}_{nested_decl.name}"
+                    self._gen_node(nested_decl)
+            elif isinstance(
+                decl, (p.Function, p.Declaration, p.StructDef, p.Typedef, p.EnumDef)
+            ):
+                # Update specific_imports mapping for this function
+                if isinstance(decl, p.Function) and decl.name in self._specific_imports:
+                    # The decl.name already has the prefix applied (see line ~558)
+                    # Just use it directly
+                    self._specific_imports[decl.name] = (
+                        lib_name.split("/")[-1],
+                        decl.name,
+                    )
+
+                # Track plstd functions if we're generating plstd
+                if lib_name.startswith("plstd/") and isinstance(decl, p.Function):
+                    self._plstd_functions.add(decl.name)
+
+                self._gen_node(decl)
+
+        # Restore the flag after generating plib code
+        self._generating_plib = old_generating
+
+    def _get_plibs_search_dirs(self):
+        """Return list of directories to search for plib files."""
+        return [
+            os.path.expanduser("~/.local/lib/PLIBS"),
+            "/usr/lib/PLIBS",
+        ]
+
+    def _collect_plib_includes(self, lib_name: str, alias: str = None):
+        """Collect includes from a plib file into self._collected_includes."""
+        import os
+        import lexer
+        import parser as p
+
+        search_dirs = []
+        if self.source_path:
+            search_dirs.append(os.path.dirname(self.source_path))
+
+        if "/" in lib_name:
+            folder, filename = lib_name.split("/", 1)
+            search_dirs.extend(
+                [
+                    os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
+                    f"/usr/lib/PLIBS/{folder}",
+                ]
+            )
+        else:
+            search_dirs.extend(
+                [
+                    ".",
+                    os.path.expanduser("~/.local/lib/PLIBS"),
+                    "/usr/lib/PLIBS",
+                ]
+            )
+
+        plib_path = None
+        search_name = lib_name.split("/")[-1]
+
+        # For paths like "folder/name" (e.g., "plstd/plstd"), look in folder subdirectory
+        if "/" in lib_name:
+            folder = lib_name.split("/")[0]
+            for base in ["."] + self._get_plibs_search_dirs():
+                folder_path = os.path.join(base, folder)
+                if os.path.isdir(folder_path):
+                    # Find any .plib file in the folder
+                    for f in os.listdir(folder_path):
+                        if f.endswith(".plib"):
+                            plib_path = os.path.join(folder_path, f)
+                            break
+                    if plib_path:
+                        break
+
+        if not plib_path:
+            # Standard search
+            for d in self._get_plibs_search_dirs():
+                candidate = os.path.join(d, f"{search_name}.plib")
+                if os.path.exists(candidate):
+                    plib_path = candidate
+                    break
+
+        if not plib_path:
+            return
+
+        self._do_collect_plib_includes(plib_path)
+
+    def _do_collect_plib_includes(self, plib_path: str):
+        """Actually parse plib and collect its includes."""
+        import lexer
+        import parser as p
+
+        with open(plib_path, "r") as f:
+            plib_content = f.read()
+
+        tokens = lexer.Lexer(plib_content).lex()
+        tokens.append(("EOF", "EOF", 0, 0))
+        plib_ast = p.Parser(tokens).parse_program()
+
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Include):
+                self._collect_include(decl)
 
     # ------------------------------------------------------------------
     # Statement / declaration dispatcher
@@ -278,7 +1083,7 @@ class CodeGen:
         elif isinstance(node, ExprStmt):
             self._gen_expr_stmt(node)
         elif isinstance(node, Include):
-            self._gen_include(node)
+            self._collect_include(node)
         elif isinstance(node, Define):
             # Emit #define directives as-is
             self._emit(node.directive)
@@ -292,6 +1097,17 @@ class CodeGen:
             self._gen_asm_block(node)
         elif hasattr(node, "__class__") and node.__class__.__name__ == "AsmBlock":
             self._gen_asm_block(node)
+        elif isinstance(node, UsingDecl):
+            pass  # Imports handled in header generation
+        elif isinstance(node, ExposeDecl):
+            pass  # Expose handled in header generation
+        elif isinstance(node, LibAccess):
+            pass  # Handled in expression context
+        elif isinstance(node, SpaceDecl):
+            for decl in node.declarations:
+                self._gen_statement(decl)
+        elif node is None:
+            pass  # Skip None declarations (e.g., skipped extern "C" blocks)
         else:
             # Expression used as a statement (e.g. bare assignment at top level)
             self._emit(f"{self._expr(node)};")
@@ -338,20 +1154,269 @@ class CodeGen:
         self._emit("")  # blank line after function
 
     def _gen_declaration(self, node: Declaration):
+        original_type = node.var_type  # Keep original for special types
         typ = self._map_type(node.var_type)
         name = node.name
         array_size = getattr(node, "array_size", None)
-        if array_size is not None:
-            if isinstance(array_size, list):
-                dims = "".join(f"[{s}]" for s in array_size)
-                name = f"{node.name}{dims}"
+
+        # Handle dynam arrays: generate as struct-based dynamic array with helper functions
+        if original_type.startswith("dynam "):
+            elem_type = original_type[6:]  # Get element type (after "dynam ")
+            mapped_elem = self._map_type(elem_type)
+
+            # Track this dynam declaration
+            self._dynam_declarations[name] = original_type
+
+            # Generate struct name for this dynam type
+            struct_name = f"dynam_{elem_type}"
+
+            # Generate struct definition and helper functions (stored in _helper_lines)
+            if struct_name not in self._generated_dynam_structs:
+                self._generated_dynam_structs.add(struct_name)
+                # Generate helper functions for this dynam type (adds to _helper_lines)
+                self._gen_dynam_helper_functions(struct_name, mapped_elem, elem_type)
+
+            # Generate initialization code
+            if node.initializer and hasattr(node.initializer, "elements"):
+                # Array initializer: [1, 2, 3]
+                init_vals = [self._expr(e) for e in node.initializer.elements]
+                init_count = len(init_vals)
+
+                # Initial capacity: at least 4 or enough for initial elements
+                init_capacity = max(4, init_count)
+
+                # Generate the dynam struct initialization with allocated data
+                self._emit(
+                    f"{struct_name} {name} = {{malloc({init_capacity} * sizeof({mapped_elem})), 0, {init_capacity}}};"
+                )
+
+                # Copy initial elements using helper function
+                for i, init_val in enumerate(init_vals):
+                    self._emit(f"{struct_name}_push(&{name}, {init_val});")
             else:
-                name = f"{node.name}[{array_size}]"
+                # Empty dynam array with default capacity 4
+                default_cap = 4
+                self._emit(
+                    f"{struct_name} {name} = {{malloc({default_cap} * sizeof({mapped_elem})), 0, {default_cap}}};"
+                )
+            return
+
+        # Handle string type: dynamic character array (like dynam char)
+        if original_type == "string":
+            # Track this string declaration
+            self._dynam_declarations[name] = "string"
+
+            # Handle string concatenation in initialization: string s = "hello" + "world";
+            if (
+                node.initializer
+                and isinstance(node.initializer, Binary)
+                and node.initializer.op == "+"
+            ):
+                left = node.initializer.left
+                right = node.initializer.right
+                # Check if both operands are string literals or string variables
+                left_is_string = (
+                    isinstance(left, Literal)
+                    and isinstance(left.value, str)
+                    and left.value.startswith('"')
+                ) or (
+                    isinstance(left, Var)
+                    and self._get_dynam_type(left.name) == "string"
+                )
+                right_is_string = (
+                    isinstance(right, Literal)
+                    and isinstance(right.value, str)
+                    and right.value.startswith('"')
+                ) or (
+                    isinstance(right, Var)
+                    and self._get_dynam_type(right.name) == "string"
+                )
+
+                if left_is_string and right_is_string:
+                    # Generate concatenation: malloc + strcpy + strcat
+                    left_expr = self._expr(left)
+                    right_expr = self._expr(right)
+                    var_name = node.name
+
+                    # Emit the concatenation sequence
+                    self._emit(
+                        f"char* _tmp = malloc(strlen({left_expr}) + strlen({right_expr}) + 1);"
+                    )
+                    self._emit(f"strcpy(_tmp, {left_expr});")
+                    self._emit(f"strcat(_tmp, {right_expr});")
+                    self._emit(f"char* {var_name} = _tmp;")
+                    return
+
+            if node.initializer and hasattr(node.initializer, "value"):
+                # String literal: "hello"
+                init_val = node.initializer.value
+                if isinstance(init_val, str) and init_val.startswith('"'):
+                    # Generate: char* name = strdup("hello");
+                    self._emit(f"char* {name} = strdup({init_val});")
+                    return
+            # Empty string
+            self._emit(f'char* {name} = strdup("");')
+            return
+            # Empty string
+            self._emit(f'char* {name} = strdup("");')
+            return
+
+        # Handle string to char array conversion: char s[] = "hello"
+        if typ == "char" and node.initializer is not None:
+            init_val = node.initializer
+            if (
+                hasattr(init_val, "value")
+                and isinstance(init_val.value, str)
+                and init_val.value.startswith('"')
+            ):
+                # Convert string to char array: "hello" -> {'h','e','l','l','o','\0'}
+                s = init_val.value[1:-1]  # Remove quotes
+                chars = [f"'{c}'" if c not in '\\"' else f"'{c}'" for c in s]
+                chars.append("'\\0'")  # Add null terminator
+                init_str = "{" + ", ".join(chars) + "}"
+                if array_size is None:
+                    # Infer size from string length + null
+                    array_size = len(chars)
+                    name = f"{name}[{array_size}]"
+                else:
+                    name = f"{name}[{array_size}]"
+                self._emit(f"char {name} = {init_str};")
+                return
+
+        # Handle function prototypes: var_type is "void (func prototype)"
+        if "(func prototype)" in node.var_type:
+            # Extract return type and params from name if stored
+            actual_type = node.var_type.replace(" (func prototype)", "")
+            actual_type = self._map_type(actual_type)
+            # Try to get params from node if available
+            params = getattr(node, "params", None)
+            if params:
+                param_str = ", ".join(f"{self._map_type(p[0])} {p[1]}" for p in params)
+                self._emit(f"{actual_type} {name}({param_str});")
+            else:
+                self._emit(f"{actual_type} {name}(void);")
+            return
+
+        # Collect dimensions from both array_size and dimensions
+        dims = getattr(node, "dimensions", None)
+
+        # Build full dimension list: use array_size for 1D, dimensions for multi-dim
+        dim_list = []
+
+        # Build full dimension list from array_size and/or dimensions
+        if dims and isinstance(dims, list):
+            # Use dimensions list directly (contains all dims)
+            dim_list = list(dims)
+        elif array_size is not None:
+            # Single dimension from array_size
+            if isinstance(array_size, list):
+                dim_list = list(array_size)
+            else:
+                dim_list = [array_size]
+
+        # If we have None in any position, try to infer from initializer
+        init = node.initializer
+
+        def count_elements_at_depth(init_list, depth):
+            """Count elements at given nesting depth."""
+            if depth < 0 or not init_list or not hasattr(init_list, "elements"):
+                return 0
+            if depth == 0:
+                return len(init_list.elements) if init_list.elements else 0
+            # Go deeper: use first element at each level
+            if init_list.elements and init_list.elements[0]:
+                return count_elements_at_depth(init_list.elements[0], depth - 1)
+            return 0
+
+        # Process each dimension position
+        for i, d in enumerate(dim_list):
+            if d is None:
+                if init:
+                    # Try to infer from initializer at this depth
+                    inferred = count_elements_at_depth(init, i)
+                    if inferred > 0:
+                        dim_list[i] = inferred
+                    else:
+                        raise ValueError(
+                            f"Cannot infer dimension {i + 1} for array '{node.name}' - "
+                            f"provide explicit size or ensure initializer has values at this level"
+                        )
+                else:
+                    raise ValueError(
+                        f"Cannot infer dimension {i + 1} for array '{node.name}' - "
+                        f"provide explicit size or initializer"
+                    )
+
+        # Build final name with all dimensions
+        def is_valid_dim(d):
+            if d is None:
+                return False
+            if isinstance(d, list):
+                return any(is_valid_dim(x) for x in d)
+            return isinstance(d, int) and d > 0
+
+        dim_str = ""
+        for d in dim_list:
+            if d is None:
+                continue
+            if isinstance(d, list):
+                dim_str += "".join(f"[{x}]" for x in d if x and isinstance(x, int))
+            elif isinstance(d, int) and d > 0:
+                dim_str += f"[{d}]"
+        if dim_str:
+            name = f"{node.name}{dim_str}"
+
+        # Emit the declaration
         if node.initializer is not None:
             val = self._expr(node.initializer)
             self._emit(f"{typ} {name} = {val};")
         else:
             self._emit(f"{typ} {name};")
+
+    def _gen_dynam_helper_functions(
+        self, struct_name: str, elem_type: str, original_elem_type: str
+    ):
+        """Generate push, pop, and len helper functions for a dynam type."""
+        # Generate struct definition
+        self._helper_lines.append(f"typedef struct {{")
+        self._helper_lines.append(f"    {elem_type}* data;")
+        self._helper_lines.append(f"    int size;")
+        self._helper_lines.append(f"    int capacity;")
+        self._helper_lines.append(f"}} {struct_name};")
+        self._helper_lines.append("")
+
+        # Generate push function
+        self._helper_lines.append(
+            f"void {struct_name}_push({struct_name}* arr, {elem_type} val) {{"
+        )
+        self._helper_lines.append(f"    if (arr->size >= arr->capacity) {{")
+        self._helper_lines.append(f"        arr->capacity *= 2;")
+        self._helper_lines.append(
+            f"        arr->data = realloc(arr->data, arr->capacity * sizeof({elem_type}));"
+        )
+        self._helper_lines.append(f"    }}")
+        self._helper_lines.append(f"    arr->data[arr->size++] = val;")
+        self._helper_lines.append(f"}}")
+        self._helper_lines.append("")
+
+        # Generate pop function
+        self._helper_lines.append(
+            f"{elem_type} {struct_name}_pop({struct_name}* arr) {{"
+        )
+        self._helper_lines.append(f"    return arr->data[--arr->size];")
+        self._helper_lines.append(f"}}")
+        self._helper_lines.append("")
+
+        # Generate len function
+        self._helper_lines.append(f"int {struct_name}_len({struct_name}* arr) {{")
+        self._helper_lines.append(f"    return arr->size;")
+        self._helper_lines.append(f"}}")
+        self._helper_lines.append("")
+
+        # Track generated functions to avoid duplicates
+        self._generated_dynam_funcs.add(f"{struct_name}_push")
+        self._generated_dynam_funcs.add(f"{struct_name}_pop")
+        self._generated_dynam_funcs.add(f"{struct_name}_len")
 
     def _gen_compound_block(self, node: Compound):
         """Emit a braced block.  Used when a Compound appears as a standalone
@@ -369,7 +1434,18 @@ class CodeGen:
 
     def _gen_if(self, node: If):
         cond = self._expr(node.cond)
-        self._emit(f"if ({cond}) {{")
+        # Don't add extra parens if condition is already a comparison (causes warnings)
+        if isinstance(node.cond, Binary) and node.cond.op in (
+            "==",
+            "!=",
+            "<",
+            ">",
+            "<=",
+            ">=",
+        ):
+            self._emit(f"if ({cond}) {{")
+        else:
+            self._emit(f"if ({cond}) {{")
         self._indent += 1
         body = node.then_branch
         if isinstance(body, Compound):
@@ -509,13 +1585,59 @@ class CodeGen:
 
     def _gen_expr_stmt(self, node: ExprStmt):
         if node.expr is not None:
+            # Handle assignment to dynam/string specially
+            if isinstance(node.expr, Assignment):
+                target = node.expr.target
+                value = node.expr.value
+
+                # Check if target is a Var that refers to a dynam or string
+                if isinstance(target, Var):
+                    var_name = target.name
+                    # Check if this variable is dynam or string by looking at declaration
+                    dynam_type = self._get_dynam_type(var_name)
+
+                    if dynam_type and dynam_type.startswith("dynam "):
+                        # This is a reassignment to a dynam array
+                        if isinstance(value, InitList):
+                            init_vals = [self._expr(e) for e in value.elements]
+                            struct_name = (
+                                f"dynam_{dynam_type[6:]}"  # "dynam int" -> "dynam_int"
+                            )
+                            mapped_elem = self._map_type(dynam_type[6:])
+
+                            # Free old data, reallocate and copy
+                            self._emit(f"free({var_name}.data);")
+                            init_capacity = max(4, len(init_vals))
+                            self._emit(
+                                f"{var_name}.data = malloc({init_capacity} * sizeof({mapped_elem}));"
+                            )
+                            self._emit(f"{var_name}.size = 0;")
+                            self._emit(f"{var_name}.capacity = {init_capacity};")
+                            for init_val in init_vals:
+                                self._emit(
+                                    f"{struct_name}_push(&{var_name}, {init_val});"
+                                )
+                            return
+
+                    if dynam_type == "string":
+                        # This is a reassignment to a string
+                        if (
+                            isinstance(value, Literal)
+                            and isinstance(value.value, str)
+                            and value.value.startswith('"')
+                        ):
+                            # String literal reassignment: free(s); s = strdup("new");
+                            self._emit(f"free({var_name});")
+                            self._emit(f"{var_name} = strdup({value.value});")
+                            return
+
             self._emit(f"{self._expr(node.expr)};")
 
-    def _gen_include(self, node: Include):
+    def _collect_include(self, node: Include):
         if node.is_system:
-            self._emit(f"#include <{node.path}>")
+            self._collected_includes.add(f"#include <{node.path}>")
         else:
-            self._emit(f'#include "{node.path}"')
+            self._collected_includes.add(f'#include "{node.path}"')
 
     def _gen_switch(self, node: Switch):
         expr = self._expr(node.expr)

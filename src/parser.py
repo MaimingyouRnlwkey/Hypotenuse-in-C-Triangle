@@ -35,6 +35,42 @@ class Program(Node):
 
 
 @dataclass
+class UsingDecl(Node):
+    """using statement for imports.
+
+    item: specific item to import (None means import all)
+    source: "<lib>" for system, "\"path\"" for local, "scope&name" for scoped
+    alias: optional rename
+    """
+
+    item: Optional[str]
+    source: str
+    alias: Optional[str] = None
+
+
+@dataclass
+class ExposeDecl(Node):
+    """expose statement to globalize a namespace."""
+
+    target: str
+
+
+@dataclass
+class LibAccess(Node):
+    """lib:symbol - explicit plstd access."""
+
+    symbol: str
+
+
+@dataclass
+class SpaceDecl(Node):
+    """space statement to declare a namespace."""
+
+    name: str
+    declarations: List[Node]
+
+
+@dataclass
 class Function(Node):
     """Function definition."""
 
@@ -54,6 +90,7 @@ class Declaration(Node):
     array_size: Optional[int] = (
         None  # Optional array size for declarations like char temp[32]
     )
+    dimensions: Optional[List] = None  # For multi-dimensional arrays like int arr[2][3]
 
 
 @dataclass
@@ -314,6 +351,16 @@ class DesignatedInit(Node):
 
 
 @dataclass
+class ArrayDesignation(Node):
+    """C11 array element designator: [expr] = value or [start...end] = value"""
+
+    index: Node
+    value: Node
+    is_range: bool = False  # True for [start...end] = val
+    end_index: Node = None  # End index for ranges
+
+
+@dataclass
 class Generic(Node):
     """C11 _Generic expression: _Generic(expr, type1: val1, type2: val2, ...)"""
 
@@ -364,6 +411,8 @@ _BASE_TYPE_TOKENS = (
     "SIGNED",
     "UNSIGNED",
     "SIZE_T",
+    "DYNAM",
+    "STRING",
 )
 
 
@@ -470,26 +519,60 @@ class Parser:
     def _parse_local_declaration(self) -> Node:
         """Parse a local variable declaration inside a function."""
         typ = self.advance()[1]
-        if typ in self._typedefs:
+
+        # Special handling for dynam type: "dynam <element_type>"
+        if typ == "dynam":
+            elem_typ = self.advance()[1]  # get element type like "int"
+            # Check for additional type qualifiers
+            while self.peek()[0] in _BASE_TYPE_TOKENS:
+                next_tok = self.peek()
+                if next_tok[0] in (
+                    "INT_LITERAL",
+                    "HEX_LITERAL",
+                    "BINARY_LITERAL",
+                    "OCTAL_LITERAL",
+                    "CHAR_LITERAL",
+                    "STRING_LITERAL",
+                    "FLOAT_LITERAL",
+                ):
+                    break
+                elem_typ2 = self.advance()[1]
+                elem_typ = f"{elem_typ} {elem_typ2}"
+            typ = f"dynam {elem_typ}"
+        elif typ in self._typedefs:
             typ = self._typedefs[typ]
         # Handle compound types: long long, unsigned long, etc.
         # Use while loop to handle multiple type qualifiers (long long)
-        while self.peek()[0] in _BASE_TYPE_TOKENS:
-            next_tok = self.peek()
-            # Stop if we hit a literal (handles suffixes like ULL)
-            if next_tok[0] in (
-                "INT_LITERAL",
-                "HEX_LITERAL",
-                "BINARY_LITERAL",
-                "OCTAL_LITERAL",
-                "CHAR_LITERAL",
-                "STRING_LITERAL",
-                "FLOAT_LITERAL",
-            ):
-                break
-            typ2 = self.advance()[1]
-            typ = f"{typ} {typ2}"
-        typ = self._consume_pointer_stars(typ)
+        elif typ not in (
+            "dynam",
+            "string",
+        ):  # Skip compound type handling for special types
+            while self.peek()[0] in _BASE_TYPE_TOKENS:
+                next_tok = self.peek()
+                # Stop if we hit a literal (handles suffixes like ULL)
+                if next_tok[0] in (
+                    "INT_LITERAL",
+                    "HEX_LITERAL",
+                    "BINARY_LITERAL",
+                    "OCTAL_LITERAL",
+                    "CHAR_LITERAL",
+                    "STRING_LITERAL",
+                    "FLOAT_LITERAL",
+                ):
+                    break
+                typ2 = self.advance()[1]
+                typ = f"{typ} {typ2}"
+
+        # Handle string type - just use "string" as the type
+        if typ == "string":
+            # string type doesn't need pointer stars, just return
+            pass
+        elif typ.startswith("dynam "):
+            # dynam type: don't add pointer stars to the dynam itself
+            # (the element type inside dynam can have pointers if needed)
+            pass
+        else:
+            typ = self._consume_pointer_stars(typ)
 
         # Allow literals after compound types (e.g., unsigned long long x = 0xFF)
         if self.peek()[0] not in (
@@ -516,21 +599,39 @@ class Parser:
             )
         name = self.expect("IDENTIFIER")[1]
 
-        array_size = None
-        if self.accept("LBRACKET"):
-            if self.peek()[0] == "INT_LITERAL":
-                array_size = int(self.advance()[1])
+        # Support multi-dimensional arrays: int arr[2][3], int arr[][3] = {{1,2,3}}
+        dimensions = []
+        while self.accept("LBRACKET"):
+            if self.peek()[0] == "RBRACKET":
+                # Empty dimension
+                dimensions.append(None)
+                self.expect("RBRACKET")
+            elif self.peek()[0] == "INT_LITERAL":
+                dimensions.append(int(self.advance()[1]))
+                self.expect("RBRACKET")
             elif self.peek()[0] == "IDENTIFIER":
-                array_size = self.advance()[1]
-            self.expect("RBRACKET")
+                dimensions.append(self.advance()[1])
+                self.expect("RBRACKET")
+            else:
+                dimensions.append(None)
+                self.expect("RBRACKET")
+
+        # Determine primary array size from first dimension
+        array_size = dimensions[0] if dimensions else None
+        # Store all dimensions for codegen (always keep for inference)
+        full_dims = dimensions if dimensions else None
 
         init = None
         if self.accept("ASSIGN"):
-            init = self.parse_assignment()
+            # Check for dynam array initializer: [1, 2, 3]
+            if self.peek()[0] == "LBRACKET" and typ.startswith("dynam"):
+                init = self.parse_array_initializer()
+            else:
+                init = self.parse_assignment()
         elif self.peek()[0] == "LBRACE":
             init = self.parse_init_list()
 
-        decls = [Declaration(typ, name, init, array_size)]
+        decls = [Declaration(typ, name, init, array_size, full_dims)]
 
         while self.accept("COMMA"):
             extra_name = self.expect("IDENTIFIER")[1]
@@ -555,7 +656,9 @@ class Parser:
         """Parse entire translation unit."""
         decls = []
         while self.peek()[0] != "EOF":
-            decls.append(self.parse_external())
+            node = self.parse_external()
+            if node is not None:
+                decls.append(node)
         return Program(decls)
 
     def _parse_preprocessor(self, directive: str) -> Optional[Node]:
@@ -574,9 +677,10 @@ class Parser:
                 path = rest[start + 1 : end]
                 return Include(path, is_system=False)
         elif stripped.startswith("#define"):
-            # Store #define as a special node that will be emitted as-is
             return Define(directive)
-        return None
+        # For other preprocessor directives (#if, #ifdef, #ifndef, #endif, etc.)
+        # Return the directive as-is to be emitted
+        return Define(directive)
 
     def parse_external(self) -> Node:
         """
@@ -585,8 +689,13 @@ class Parser:
         - Function prototypes
         - Global variables
         - Include directives
+        - Namespace blocks (space)
         """
         t = self.peek()
+
+        # Handle namespace blocks (space)
+        if t[0] == "SPACE":
+            return self.parse_space()
 
         # Handle preprocessor directives
         if t[0] == "PREPROCESSOR":
@@ -621,6 +730,35 @@ class Parser:
                     fallback=f"Deprecated keyword used at line {line}, column {col}! Found '{t[0]}'.",
                 )
             )
+
+        if t[0] == "USING":
+            return self.parse_using()
+
+        if t[0] == "EXPOSE":
+            return self.parse_expose()
+
+        if t[0] == "SPACE":
+            return self.parse_space()
+
+        # Handle extern "C" { } - skip entirely (C doesn't need linkage specifiers)
+        if t[0] == "EXTERN":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "STRING_LITERAL" and next_tok[1] == '"C"':
+                self.advance()  # skip extern
+                self.advance()  # skip "C"
+                if self.peek()[0] == "LBRACE":
+                    self.advance()  # skip {
+                    depth = 1
+                    while self.i < len(self.tokens) and depth > 0:
+                        if self.peek()[0] == "LBRACE":
+                            depth += 1
+                        elif self.peek()[0] == "RBRACE":
+                            depth -= 1
+                        self.advance()
+                return None
+            # Not extern "C" - fall through
 
         if t[0] == "TYPEDEF":
             return self.parse_typedef()
@@ -719,106 +857,87 @@ class Parser:
                 params = []
 
                 if not self.accept("RPAREN"):
-                    # Handle void parameter (means no params)
                     if self.peek()[0] == "VOID":
-                        self.advance()  # consume void
+                        self.advance()
                         self.expect("RPAREN")
-                        params = []
                     else:
                         while True:
-                            type_qualifiers = []
+                            if self.accept("ELLIPSIS"):
+                                params.append(("...", "..."))
+                                self.expect("RPAREN")
+                                break
+
+                            qualifiers = []
                             while self.peek()[0] in ("CONST", "VOLATILE"):
-                                type_qualifiers.append(self.advance()[1])
+                                qualifiers.append(self.advance()[1])
 
                             ptype = self.advance()[1]
                             if ptype in self._typedefs:
                                 ptype = self._typedefs[ptype]
-                            elif (
-                                ptype == "struct" or ptype == "union" or ptype == "enum"
-                            ):
-                                if self.peek()[0] == "IDENTIFIER":
-                                    ptype = f"{ptype} {self.advance()[1]}"
                             elif self.peek()[0] in _BASE_TYPE_TOKENS:
-                                ptype2 = self.advance()[1]
-                                ptype = f"{ptype} {ptype2}"
+                                ptype = f"{ptype} {self.advance()[1]}"
+
                             ptype = self._consume_pointer_stars(ptype)
-
-                            # Handle type qualifiers AFTER pointer (like const after *)
-                            while self.peek()[0] in ("CONST", "VOLATILE"):
-                                type_qualifiers.append(self.advance()[1])
-
-                            # Prepend qualifiers if any
-                            if type_qualifiers:
-                                ptype = " ".join(type_qualifiers) + " " + ptype
+                            if qualifiers:
+                                ptype = " ".join(qualifiers) + " " + ptype
 
                             pname = self.expect("IDENTIFIER")[1]
-                            psize = None
-                            psize_list = []
-                            while self.accept("LBRACKET"):
-                                if self.peek()[0] == "INT_LITERAL":
-                                    psize_list.append(int(self.advance()[1]))
-                                elif self.peek()[0] == "IDENTIFIER":
-                                    psize_list.append(self.advance()[1])
-                                else:
-                                    psize_list.append(0)
-                                self.expect("RBRACKET")
-                            if psize_list:
-                                if len(psize_list) == 1:
-                                    psize = psize_list[0]
-                                else:
-                                    psize = psize_list
-                            params.append((ptype, pname, psize))
+                            params.append((ptype, pname, None))
+
                             if self.accept("COMMA"):
-                                # Handle variadic functions with ...
-                                if self.accept("ELLIPSIS"):
-                                    params.append(("...", "..."))
-                                    self.expect("RPAREN")
-                                    break
                                 continue
                             self.expect("RPAREN")
                             break
 
-                # Function definition vs prototype
                 if self.peek()[0] == "LBRACE":
                     return Function(typ, name, params, self.parse_compound())
-                else:
-                    self.expect("SEMICOLON")
-                    return Declaration(f"{typ} (func prototype)", name, None)
+                self.expect("SEMICOLON")
+                return Declaration(f"{typ} (prototype)", name, None)
 
-            # Global variable — may have comma-separated declarators
-            # Handle array declaration (including multi-dimensional)
+            # Global variable
             array_size = None
             sizes = []
             while self.accept("LBRACKET"):
-                if self.peek()[0] == "INT_LITERAL":
+                if self.peek()[0] == "RBRACKET":
+                    # Empty dimension - mark as None for inference
+                    sizes.append(None)
+                    self.expect("RBRACKET")
+                elif self.peek()[0] == "INT_LITERAL":
                     sizes.append(int(self.advance()[1]))
+                    self.expect("RBRACKET")
                 elif self.peek()[0] == "IDENTIFIER":
-                    # Handle macro constants in array sizes (e.g., #define BUFF 1024)
+                    # Handle macro constants in array sizes
                     ident = self.advance()[1]
-                    # Try to resolve as a known macro or leave as identifier
-                    sizes.append(ident)  # Keep as string for later resolution
+                    sizes.append(ident)
+                    self.expect("RBRACKET")
                 else:
-                    sizes.append(0)  # flexible array
-                self.expect("RBRACKET")
+                    sizes.append(None)
+                    self.expect("RBRACKET")
             if len(sizes) > 0:
                 array_size = sizes[0] if len(sizes) == 1 else sizes
+                # Store full dimensions for inference
+                full_dims = sizes if len(sizes) > 1 else sizes
 
             init = self.parse_assignment() if self.accept("ASSIGN") else None
-            decls = [Declaration(typ, name, init, array_size)]
+            decls = [Declaration(typ, name, init, array_size, full_dims)]
             while self.accept("COMMA"):
                 extra_name = self.expect("IDENTIFIER")[1]
                 # Handle multi-dimensional array in comma-separated list
                 extra_sizes = []
                 while self.accept("LBRACKET"):
-                    if self.peek()[0] == "INT_LITERAL":
+                    if self.peek()[0] == "RBRACKET":
+                        extra_sizes.append(None)
+                        self.expect("RBRACKET")
+                    elif self.peek()[0] == "INT_LITERAL":
                         extra_sizes.append(int(self.advance()[1]))
+                        self.expect("RBRACKET")
                     elif self.peek()[0] == "IDENTIFIER":
-                        # Handle macro constants in array sizes
                         ident = self.advance()[1]
                         extra_sizes.append(ident)
+                        self.expect("RBRACKET")
                     else:
-                        extra_sizes.append(0)
-                    self.expect("RBRACKET")
+                        extra_sizes.append(None)
+                        self.expect("RBRACKET")
                 extra_array_size = (
                     extra_sizes[0]
                     if len(extra_sizes) == 1
@@ -826,8 +945,13 @@ class Parser:
                     if extra_sizes
                     else None
                 )
+                extra_full_dims = extra_sizes if extra_sizes else None
                 extra_init = self.parse_assignment() if self.accept("ASSIGN") else None
-                decls.append(Declaration(typ, extra_name, extra_init, extra_array_size))
+                decls.append(
+                    Declaration(
+                        typ, extra_name, extra_init, extra_array_size, extra_full_dims
+                    )
+                )
             self.expect("SEMICOLON")
             if len(decls) == 1:
                 return decls[0]
@@ -836,17 +960,217 @@ class Parser:
             # extend it below instead).
             return _MultiDecl(decls)
 
+    def parse_using(self) -> UsingDecl:
+        """Parse a using statement.
+
+        Forms:
+            using "x"           # import all from local
+            using "x" as y      # import all with alias
+            using X from <Y>    # import specific from system
+            using X from "Y"    # import specific from local
+            using X from <Y> as Z  # import with alias
+            using scope&X       # import from scoped
+            using main&X       # import from scoped (any identifier)
+            using foo&X as Y  # import from scoped with alias
+        """
+        self.expect("USING")
+        t = self.peek()
+
+        # Check for X& form (import from scoped, where X is any identifier like main, foo, etc.)
+        # Supports chained scopes: using a&b&c&symbol
+        if t[0] == "IDENTIFIER":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "AMPERSAND":
+                # This is a scoped import: using X&Y or using a&b&c&Y
+                scope_parts = []
+                # Collect the first identifier
+                scope_parts.append(self.advance()[1])
+                # Loop through all ampersands
+                while self.peek()[0] == "AMPERSAND":
+                    self.expect("AMPERSAND")
+                    # Can be IDENTIFIER or another scope reference
+                    if self.peek()[0] == "IDENTIFIER":
+                        scope_parts.append(self.advance()[1])
+                    else:
+                        break
+                # Build source string from parts
+                source = "&".join(scope_parts)
+                alias = self._parse_optional_alias()
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
+                return UsingDecl(item=None, source=source, alias=alias)
+
+        # Check if we're importing a specific item (identifier before "from")
+        if t[0] == "IDENTIFIER":
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "FROM":
+                # Item specified: using X from ...
+                item = self.advance()[1]
+                self.expect("FROM")
+                source = self._parse_import_source()
+                alias = self._parse_optional_alias()
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
+                return UsingDecl(item=item, source=source, alias=alias)
+            elif next_tok and next_tok[0] == "AS":
+                # Direct import with alias: using "x" as y
+                source = self.advance()[1]
+                alias = self._parse_optional_alias()
+                # Semicolon is optional for using statements
+                if self.peek()[0] == "SEMICOLON":
+                    self.expect("SEMICOLON")
+                return UsingDecl(item=None, source=source, alias=alias)
+
+        # Check for string literal (import all from local)
+        if t[0] == "STRING_LITERAL":
+            source = self.advance()[1].strip('"')
+            alias = self._parse_optional_alias()
+            # Semicolon is optional for using statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
+            return UsingDecl(item=None, source=source, alias=alias)
+
+        # Check for system lib <x>
+        if t[0] == "LT":
+            source = self._parse_import_source()
+            alias = self._parse_optional_alias()
+            # Semicolon is optional for using statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
+            return UsingDecl(item=None, source=source, alias=alias)
+
         line = t[2] if len(t) > 2 else 0
         col = t[3] if len(t) > 3 else 0
         raise SyntaxError(
             error_msgs.get_error_msg(
                 "E001",
-                found=t[0],
+                found=t[1],
                 line=line,
                 col=col,
-                fallback=f"Unexpected token at line {line}, column {col}: {t}",
+                fallback=f"Invalid using statement at line {line}, column {col}",
             )
         )
+
+    def _parse_import_source(self) -> str:
+        """Parse the source of an import: <lib> or <lib/sublib> or "path"."""
+        t = self.peek()
+        if t[0] == "LT":
+            self.expect("LT")
+            # Handle both IDENTIFIER and PLSTD (plstd is a reserved keyword)
+            if self.peek()[0] == "PLSTD":
+                lib_name = self.expect("PLSTD")[1]
+            else:
+                lib_name = self.expect("IDENTIFIER")[1]
+
+            # Handle path-like imports: <plstd/printd>
+            while self.peek()[0] == "DIVIDE":
+                self.expect("DIVIDE")
+                if self.peek()[0] == "PLSTD":
+                    lib_name += "/" + self.expect("PLSTD")[1]
+                else:
+                    lib_name += "/" + self.expect("IDENTIFIER")[1]
+
+            self.expect("GT")
+            return f"<{lib_name}>"
+        elif t[0] == "STRING_LITERAL":
+            return self.advance()[1].strip('"')
+        else:
+            line = t[2] if len(t) > 2 else 0
+            col = t[3] if len(t) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found=t[1],
+                    line=line,
+                    col=col,
+                    fallback=f"Invalid import source at line {line}, column {col}",
+                )
+            )
+
+    def _parse_optional_alias(self) -> Optional[str]:
+        """Parse optional 'as' alias."""
+        if self.accept("AS"):
+            return self.expect("IDENTIFIER")[1]
+        return None
+
+    def _parse_lib_call(self, symbol: str) -> Node:
+        """Parse a lib~symbol(...) call."""
+        self.expect("LPAREN")
+        args = []
+        if self.peek()[0] != "RPAREN":
+            args.append(self.parse_assignment())
+            while self.accept("COMMA"):
+                args.append(self.parse_assignment())
+        self.expect("RPAREN")
+        # Convert to a Call node with lib~ prefix
+        return Call(callee=Var(f"lib~{symbol}"), args=args)
+
+    def parse_expose(self) -> ExposeDecl:
+        """Parse an expose statement: expose namespace or expose func@namespace."""
+        self.expect("EXPOSE")
+        t = self.peek()
+        if t[0] == "IDENTIFIER":
+            target = self.advance()[1]
+            # Check for @ syntax like expose printd@plstd or expose printd@lib
+            if self.peek()[0] == "AT":
+                self.expect("AT")
+                # Can be IDENTIFIER, PLSTD, or LIB for the namespace
+                if self.peek()[0] in ("PLSTD", "LIB"):
+                    namespace = self.advance()[1]
+                else:
+                    namespace = self.expect("IDENTIFIER")[1]
+                target = f"{target}@{namespace}"
+            self.expect("SEMICOLON")
+            return ExposeDecl(target=target)
+        elif t[0] == "PLSTD":
+            self.advance()
+            self.expect("SEMICOLON")
+            return ExposeDecl(target="plstd")
+
+        return None
+
+    def parse_extern_c_block(self):
+        """Skip contents of extern \"C\" { } block (no-op in C)."""
+        while self.peek()[0] != "EOF":
+            if self.peek()[0] == "RBRACE":
+                self.expect("RBRACE")
+                break
+            # Skip each token until we hit the closing brace
+            self.advance()
+        return None  # Return None - extern "C" block is ignored in C
+
+    def parse_space(self) -> SpaceDecl:
+        """Parse a namespace block declaration."""
+        self.expect("SPACE")
+        t = self.peek()
+        if t[0] == "IDENTIFIER" or t[0] == "PLSTD":
+            name = self.advance()[1]
+            self.expect("LBRACE")
+            declarations = []
+            while True:
+                if self.peek()[0] == "RBRACE":
+                    self.advance()
+                    break
+                declarations.append(self.parse_external())
+            return SpaceDecl(name=name, declarations=declarations)
+        else:
+            line = t[2] if len(t) > 2 else 0
+            col = t[3] if len(t) > 3 else 0
+            raise SyntaxError(
+                error_msgs.get_error_msg(
+                    "E001",
+                    found=t[1],
+                    line=line,
+                    col=col,
+                    fallback=f"Invalid space statement at line {line}, column {col}",
+                )
+            )
 
     def parse_typedef(self) -> Node:
         """Parse a typedef declaration."""
@@ -970,8 +1294,17 @@ class Parser:
                 field_type = field_type.strip()
                 field_type = self._consume_pointer_stars(field_type)
                 field_name = self.expect("IDENTIFIER")[1]
+                # Support array fields: int arr[5], int arr[], char s[]
+                array_suffix = ""
+                while self.accept("LBRACKET"):
+                    dim = self.advance()[1] if self.peek()[0] != "RBRACKET" else ""
+                    array_suffix += f"[{dim}]"
+                    self.expect("RBRACKET")
+                full_name = (
+                    f"{field_name}{array_suffix}" if array_suffix else field_name
+                )
                 self.expect("SEMICOLON")
-                fields.append((field_type, field_name))
+                fields.append((field_type, full_name))
             self.expect("RBRACE")
             self.expect("SEMICOLON")
             return StructDef(name=name, fields=fields, is_anonymous=is_anonymous)
@@ -1581,10 +1914,19 @@ class Parser:
             # Handle array declarations: char temp[32]
             array_size = None
             if self.peek()[0] == "LBRACKET":
-                self.advance()  # consume '['
-                if self.peek()[0] == "INT_LITERAL":
-                    array_size = int(self.advance()[1])
-                self.expect("RBRACKET")
+                # Simple heuristic: if this is a reassignment (arr = [1,2,3]),
+                # the LBRACKET is NOT an array size but an initializer
+                # Check if this is a redeclaration - if the name already exists,
+                # LBRACKET is an initializer, not array size
+                # For now, just check if we just parsed a name and the previous token is =
+                prev_tok = self.tokens[self.i - 1] if self.i > 0 else None
+                is_reassignment = prev_tok and prev_tok[0] == "ASSIGN"
+
+                if not is_reassignment:
+                    self.advance()  # consume '['
+                    if self.peek()[0] == "INT_LITERAL":
+                        array_size = int(self.advance()[1])
+                    self.expect("RBRACKET")
 
             # Handle initialization
             init = None
@@ -1659,10 +2001,26 @@ class Parser:
         self.expect("RBRACE")
         return InitList(elements)
 
+    def parse_array_initializer(self) -> InitList:
+        """Parse a bracket-enclosed array initializer: [ expr, expr, ... ]"""
+        self.expect("LBRACKET")
+        elements = []
+        if self.peek()[0] != "RBRACKET":
+            elements.append(self.parse_assignment())
+            while self.accept("COMMA"):
+                if self.peek()[0] == "RBRACKET":
+                    break
+                elements.append(self.parse_assignment())
+        self.expect("RBRACKET")
+        return InitList(elements)
+
     def parse_initializer_element(self) -> Node:
         """Parse a single element in an initializer list.
 
-        Handles both regular expressions and C11 designated initializers (.field = value).
+        Handles C11 designated initializers:
+        - .field = value (struct field)
+        - [expr] = value (array element)
+        - [start...end] = value (array range)
         """
         if self.peek()[0] == "DOT":
             self.advance()
@@ -1670,6 +2028,21 @@ class Parser:
             self.expect("ASSIGN")
             value = self.parse_assignment()
             return DesignatedInit(field=field_name, value=value)
+        if self.peek()[0] == "LBRACKET":
+            self.advance()
+            start_idx = self.parse_expression()
+            if self.accept("ELLIPSIS"):
+                end_idx = self.parse_expression()
+                self.expect("RBRACKET")
+                self.expect("ASSIGN")
+                value = self.parse_assignment()
+                return ArrayDesignation(
+                    index=start_idx, value=value, is_range=True, end_index=end_idx
+                )
+            self.expect("RBRACKET")
+            self.expect("ASSIGN")
+            value = self.parse_assignment()
+            return ArrayDesignation(index=start_idx, value=value)
         return self.parse_assignment()
 
     # ============================================================
@@ -1803,6 +2176,17 @@ class Parser:
             return Unary(op="&", operand=operand, prefix=True)
         return self.parse_postfix()
 
+    def _is_assignment_rhs(self) -> bool:
+        """Check if we're in the right-hand side of an assignment.
+
+        Looks backward to see if the previous token was an ASSIGN.
+        """
+        if self.i == 0:
+            return False
+        # Check if previous token was ASSIGN
+        prev_tok = self.tokens[self.i - 1]
+        return prev_tok[0] == "ASSIGN"
+
     def parse_postfix(self) -> Node:
         """Parse postfix expressions: calls, subscripts, and x++/x--."""
         node = self.parse_primary()
@@ -1825,11 +2209,20 @@ class Parser:
                 self.expect("RPAREN")
                 node = Call(node, args)
             elif self.peek()[0] == "LBRACKET":
-                # Array subscript: expr[index]
-                self.advance()
-                index = self.parse_expression()
-                self.expect("RBRACKET")
-                node = ArrayAccess(node, index)
+                # Check if this is an array subscript (e.g., arr[0]) or array initializer
+                # Array initializer only happens when we're at the start of an expression
+                # Array subscript happens after we've already parsed an expression
+                if isinstance(node, Var) and self._is_assignment_rhs():
+                    # In assignment RHS context, [1, 2, 3] is array initializer
+                    self.advance()  # consume LBRACKET
+                    init = self.parse_array_initializer()
+                    node = init
+                else:
+                    # Array subscript: arr[0]
+                    self.advance()  # consume LBRACKET
+                    index = self.parse_expression()
+                    self.expect("RBRACKET")
+                    node = ArrayAccess(node, index)
             elif self.peek()[0] in ("INCREMENT", "DECREMENT"):
                 # Postfix ++/--: expr++ / expr--
                 op = self.advance()[1]
@@ -1846,19 +2239,46 @@ class Parser:
                 # Convert arrow to (*expr).field for AST representation
                 deref = Unary(op="*", operand=node, prefix=True)
                 node = FieldAccess(deref, field_name)
+            elif self.peek()[0] == "AT":
+                # Namespace access: namespace@symbol
+                # Only valid when node is a Var (identifier)
+                if not isinstance(node, Var):
+                    break
+                self.advance()
+                if self.peek()[0] == "AT":
+                    # Handle @@ (two ats) for nested namespace
+                    self.advance()
+                    symbol = self.expect("IDENTIFIER")[1]
+                    node = Var(f"{node.name}@@{symbol}")
+                else:
+                    # Single @ - treat as namespace prefix
+                    symbol = self.expect("IDENTIFIER")[1]
+                    node = Var(f"{node.name}@{symbol}")
             else:
                 break
         return node
 
     def parse_type_expression(self) -> Node:
-        """Parse a type keyword or compound type (e.g., int, long long)."""
+        """Parse a type keyword or compound type (e.g., int, long long, dynam int, string)."""
         if self.peek()[0] in _BASE_TYPE_TOKENS:
             type1 = self.advance()[1]
+            # Handle dynam type: "dynam <element_type>"
+            if type1 == "dynam":
+                elem_type = self.parse_type_expression()
+                return TypeExpr(f"dynam {elem_type.type_name}")
+            # Handle string type (no element type needed)
+            if type1 == "string":
+                return TypeExpr("string")
             if self.peek()[0] in _BASE_TYPE_TOKENS:
                 type2 = self.advance()[1]
                 type1 = f"{type1} {type2}"
             type1 = self._consume_pointer_stars(type1)
             return TypeExpr(type1)
+        # Handle typedef names (user-defined types)
+        if self.peek()[0] == "IDENTIFIER" and self.peek()[1] in self._typedefs:
+            type_name = self.advance()[1]
+            type_name = self._consume_pointer_stars(type_name)
+            return TypeExpr(type_name)
         if self.peek()[0] == "STRUCT":
             self.advance()
             type_name = "struct"
@@ -1938,6 +2358,26 @@ class Parser:
     def parse_primary(self) -> Node:
         """Parse the most basic expression forms."""
         tok = self.peek()
+
+        # Handle printd@lib - namespace access (function@namespace)
+        if tok[0] == "IDENTIFIER":
+            # Check if this is followed by @
+            next_tok = (
+                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
+            )
+            if next_tok and next_tok[0] == "AT":
+                # This is function@namespace pattern
+                func_name = self.advance()[1]
+                self.expect("AT")
+                # Namespace can be IDENTIFIER or LIB (for lib)
+                if self.peek()[0] == "IDENTIFIER":
+                    namespace = self.advance()[1]
+                elif self.peek()[0] == "LIB":
+                    namespace = self.advance()[1]
+                else:
+                    namespace = self.expect("IDENTIFIER")[1]
+                return Var(f"{func_name}@{namespace}")
+
         if tok[0] == "IDENTIFIER":
             return Var(self.advance()[1])
         if tok[0] in (
@@ -1946,77 +2386,45 @@ class Parser:
             "CHAR_LITERAL",
             "HEX_LITERAL",
             "BINARY_LITERAL",
+            "OCTAL_LITERAL",
+            "STRING_LITERAL",
         ):
             return Literal(self.advance()[1])
-        if tok[0] == "MINUS":
-            next_tok = (
-                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
-            )
-            if next_tok and next_tok[0] in (
-                "INT_LITERAL",
-                "FLOAT_LITERAL",
-                "HEX_LITERAL",
-                "BINARY_LITERAL",
-            ):
-                self.advance()
-                val = self.advance()[1]
-                return Literal(f"-{val}")
-        if tok[0] == "STRING_LITERAL":
-            parts = [self.advance()[1]]
-            while self.peek()[0] == "STRING_LITERAL":
-                parts.append(self.advance()[1])
-            if len(parts) == 1:
-                return Literal(parts[0])
-            return Literal("".join(parts))
-        if tok[0] == "SIZEOF":
-            self.advance()
-            self.expect("LPAREN")
-            if self.peek()[0] in _TYPE_TOKENS:
-                type_node = self.parse_type_expression()
-                self.expect("RPAREN")
-                return Unary(op="sizeof", operand=type_node, prefix=True)
-            if self.peek()[0] == "STRUCT":
-                self.advance()
-                type_name = "struct"
-                if self.peek()[0] == "IDENTIFIER":
-                    type_name += " " + self.advance()[1]
-                self.expect("RPAREN")
-                return Unary(op="sizeof", operand=TypeExpr(type_name), prefix=True)
-            operand = self.parse_expression()
-            self.expect("RPAREN")
-            return Unary(op="sizeof", operand=operand, prefix=True)
-        if tok[0] == "LBRACE":
-            # Brace-init list in expression position
-            return self.parse_init_list()
+        if tok[0] == "FLOAT_LITERAL":
+            return Literal(self.advance()[1])
         if tok[0] == "LPAREN":
             self.advance()
-            if self.peek()[0] in (
-                "INT",
-                "CHAR",
-                "VOID",
-                "FLOAT",
-                "DOUBLE",
-                "SHORT",
-                "LONG",
-                "SIGNED",
-                "UNSIGNED",
-                "CONST",
-                "VOLATILE",
+            # Check if this is a cast: (type)expr vs grouping: (expr)
+            # Cast if: base type, struct/union/enum keyword, or typedef name
+            is_typedef = (
+                self.peek()[0] == "IDENTIFIER" and self.peek()[1] in self._typedefs
+            )
+            if (
+                self.peek()[0] in _BASE_TYPE_TOKENS
+                or self.peek()[0]
+                in (
+                    "STRUCT",
+                    "UNION",
+                    "ENUM",
+                )
+                or is_typedef
             ):
+                # Cast path - go to cast handling
+                # First, save position so we can resume here
+                # Handle type with pointer/array suffixes and potential compound literal
+                # Then parse operand and return Cast node
                 type_node = self.parse_type_expression()
                 while self.peek()[0] == "MULTIPLY":
                     self.advance()
                     type_node.type_name += "*"
-                # Handle array type suffix: (int[])...
                 if self.peek()[0] == "LBRACKET":
-                    self.advance()  # consume '['
+                    self.advance()
                     if self.peek()[0] == "RBRACKET":
                         type_node.type_name += "[]"
                     else:
                         size = self.expect("INT_LITERAL")[1]
                         type_node.type_name += f"[{size}]"
                     self.expect("RBRACKET")
-                # Check for compound literal: (type){ ... }
                 if self.peek()[0] == "LBRACE":
                     init_list = self.parse_init_list()
                     return CompoundLiteral(
@@ -2025,44 +2433,18 @@ class Parser:
                 self.expect("RPAREN")
                 operand = self.parse_unary()
                 return Cast(cast_type=type_node.type_name, operand=operand)
-            elif self.peek()[0] in ("STRUCT", "UNION", "ENUM"):
-                type_name = self.advance()[1]
-                if self.peek()[0] == "IDENTIFIER":
-                    type_name += " " + self.advance()[1]
-                while self.peek()[0] == "MULTIPLY":
-                    self.advance()
-                    type_name += "*"
-                # Check for compound literal: (struct Name){ ... }
-                if self.peek()[0] == "LBRACE":
-                    init_list = self.parse_init_list()
-                    return CompoundLiteral(
-                        lit_type=type_name, elements=init_list.elements
-                    )
+            else:
+                # Grouping: (expr)
+                node = self.parse_expression()
                 self.expect("RPAREN")
-                operand = self.parse_unary()
-                return Cast(cast_type=type_name, operand=operand)
-            elif self.peek()[0] == "IDENTIFIER":
-                ident = self.peek()[1]
-                if ident in self._typedefs:
-                    type_name = self.advance()[1]
-                    if self.peek()[0] == "IDENTIFIER":
-                        type_name += " " + self.advance()[1]
-                    while self.peek()[0] == "MULTIPLY":
-                        self.advance()
-                        type_name += "*"
-                    if self.peek()[0] == "LBRACE":
-                        init_list = self.parse_init_list()
-                        return CompoundLiteral(
-                            lit_type=type_name, elements=init_list.elements
-                        )
-                    self.expect("RPAREN")
-                    operand = self.parse_unary()
-                    return Cast(cast_type=type_name, operand=operand)
-            expr = self.parse_expression()
-            self.expect("RPAREN")
-            return expr
+                return CompoundLiteral("()", [node]) if self.accept("LBRACE") else node
+        if tok[0] == "LBRACE":
+            return self.parse_init_list()
         if tok[0] in _BASE_TYPE_TOKENS:
             return TypeExpr(self.advance()[1])
+        if tok[0] == "LBRACKET":
+            # Parse as array initializer: [1, 2, 3]
+            return self.parse_array_initializer()
         if tok[0] == "UNDERSCORE_GENERIC":
             return self.parse_generic()
         line = tok[2] if len(tok) > 2 else 0

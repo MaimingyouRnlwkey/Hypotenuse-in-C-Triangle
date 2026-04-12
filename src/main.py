@@ -1,6 +1,6 @@
 import argparse
 
-# import sys  # removed unused import
+
 import lexer
 import parser as p
 import structure
@@ -15,7 +15,7 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    parser.add_argument("files", nargs="+", help="Source file(s) to compile")
+    parser.add_argument("files", nargs="*", help="Source file(s) to compile")
 
     parser.add_argument(
         "-t", "--tokens", action="store_true", help="Print lexical tokens and exit"
@@ -47,11 +47,29 @@ def parse_args():
         help="Pass extra flags to gcc (e.g., '$(sdl2-config --cflags --libs)')",
     )
 
+    parser.add_argument(
+        "-i",
+        "--install",
+        metavar="PATH",
+        help="Install file to PLIBS folder (system or user)",
+    )
+
+    parser.add_argument(
+        "-r",
+        "--remove",
+        metavar="NAME",
+        help="Remove a .plib file from PLIBS folder by name",
+    )
+
     return parser.parse_args()
 
 
 def print_tokens(tokens):
     """Pretty-print a token list."""
+    if not tokens:
+        print("\u250c\u2500 Tokens (none) \u2510")
+        print("\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2518")
+        return
     width = max(len(t[0]) for t in tokens)
     print("\u250c\u2500 Tokens " + "\u2500" * (width + 24) + "\u2510")
     for t in tokens:
@@ -121,7 +139,7 @@ def compile_file(path):
     objects = structor.build_from_ast()
 
     # 🔥 ACTUAL COMPILATION
-    codegen_obj = codegen.CodeGen(ast, structor)
+    codegen_obj = codegen.CodeGen(ast, structor, source_path=path)
     output = codegen_obj.generate()
 
     return tokens, output, objects
@@ -143,12 +161,49 @@ def compile_with_gcc(c_path, output_path=None, extra_flags=None):
 
     if output_path is None:
         output_path = os.path.splitext(c_path)[0]
-    else:
-        output_path = output_path
+    # else: output_path is already set correctly, no need for reassignment
 
     cmd = ["gcc", c_path, "-o", output_path]
+    # Basic validation for extra_flags to prevent obvious injection attempts
     if extra_flags:
-        cmd.extend(extra_flags.split())
+        # Split and filter out any empty strings or potentially dangerous flags
+        flags = [flag for flag in extra_flags.split() if flag.strip()]
+        # Additional safety: reject flags that try to change output file or perform dangerous operations
+        safe_flags = []
+        skip_next = False
+        for i, flag in enumerate(flags):
+            if skip_next:
+                skip_next = False
+                continue
+            # Skip -o and its argument as we control the output file
+            if flag == "-o":
+                skip_next = True  # Skip the next argument (output file)
+                continue
+            # Allow library/include/linker flags
+            if (
+                flag.startswith("-l")
+                or flag.startswith("-L")
+                or flag.startswith("-I")
+                or flag.startswith("-D")
+            ):
+                safe_flags.append(flag)
+            # Allow linker flags
+            elif flag.startswith("-Wl,"):
+                safe_flags.append(flag)
+            # Allow common warning/optimization/debug flags
+            elif (
+                flag in ["-Wall", "-Wextra", "-Werror", "-pedantic"]
+                or flag.startswith("-std=")
+                or flag in ["-O0", "-O1", "-O2", "-O3", "-Os", "-Ofast"]
+                or flag == "-g"
+            ):
+                safe_flags.append(flag)
+            # Allow non-flag arguments (for flexibility)
+            elif not flag.startswith("-"):
+                safe_flags.append(flag)
+            # Ignore other flags for safety
+
+        cmd.extend(safe_flags)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -158,12 +213,91 @@ def compile_with_gcc(c_path, output_path=None, extra_flags=None):
     return output_path
 
 
+def install_to_plibs(source_path):
+    """Install a file to the PLIBS folder (system or user)."""
+    import shutil
+    import os
+
+    if not os.path.exists(source_path):
+        print(f"Error: file not found: {source_path}")
+        return
+
+    filename = os.path.basename(source_path)
+    if not filename.endswith(".plib"):
+        print(f"Error: only .plib files can be installed, got '{filename}'")
+        return
+
+    # Try system location first, then user location
+    system_plibs = "/usr/lib/PLIBS"
+    user_plibs = os.path.expanduser("~/.local/lib/PLIBS")
+
+    # Try system location first
+    if os.path.exists(system_plibs) and os.access(system_plibs, os.W_OK):
+        dest = os.path.join(system_plibs, filename)
+        shutil.copy2(source_path, dest)
+        print(f"Installed to {dest}")
+        return
+
+    # Try user location
+    try:
+        os.makedirs(user_plibs, exist_ok=True)
+        if os.access(user_plibs, os.W_OK):
+            dest = os.path.join(user_plibs, filename)
+            shutil.copy2(source_path, dest)
+            print(f"Installed to {dest}")
+            return
+        else:
+            print(f"Error: no write access to PLIBS folder: {user_plibs}")
+    except OSError as e:
+        print(f"Error: could not create PLIBS folder {user_plibs}: {e}")
+
+    print("Error: no writable PLIBS folder found")
+
+
+def remove_from_plibs(name):
+    """Remove a .plib file from PLIBS folder by name."""
+    import os
+
+    if not name.endswith(".plib"):
+        name = name + ".plib"
+
+    # Try both locations
+    system_plibs = "/usr/lib/PLIBS"
+    user_plibs = os.path.expanduser("~/.local/lib/PLIBS")
+
+    removed = False
+    for plibs_dir in [system_plibs, user_plibs]:
+        path = os.path.join(plibs_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Removed from {path}")
+            removed = True
+            break
+
+    if not removed:
+        print(f"Error: '{name}' not found in any PLIBS folder")
+
+
 def main():
     args = parse_args()
 
+    # -----------------------------
+    # Install mode
+    # -----------------------------
+    if args.install:
+        install_to_plibs(args.install)
+        return
+
+    # -----------------------------
+    # Remove mode
+    # -----------------------------
+    if args.remove:
+        remove_from_plibs(args.remove)
+        return
+
     for path in args.files:
-        if not path.endswith(".ctri"):
-            print(f"Error: Only .ctri files are supported, got '{path}'")
+        if not path.endswith((".ctri", ".plib")):
+            print(f"Error: Only .ctri/.plib files are supported, got '{path}'")
             continue
         try:
             tokens, output, objects = compile_file(path)
@@ -199,11 +333,17 @@ def main():
                 write_output(c_path, output)
             else:
                 print(output)
-                c_path = path.replace(".ctri", ".c")
+                # Handle both .ctri and .plib file extensions
+                if path.endswith(".ctri"):
+                    c_path = path.replace(".ctri", ".c")
+                elif path.endswith(".plib"):
+                    c_path = path.replace(".plib", ".c")
+                else:
+                    # Fallback - should not happen due to earlier check
+                    c_path = path + ".c"
 
             if args.compile:
-                if not args.output:
-                    write_output(c_path, output)
+                write_output(c_path, output)
                 exe_path = compile_with_gcc(c_path, args.output, args.cflags)
                 print(f"Compiled to: {exe_path}")
 
@@ -213,8 +353,12 @@ def main():
             print(f"Error reading file: {error}")
         except SyntaxError as error:
             print(f"Syntax error: {error}")
-        except Exception as error:
+        except RuntimeError as error:
             print(f"Compilation error: {error}")
+        except Exception as error:
+            # Re-raise unexpected exceptions for debugging while still providing user feedback
+            print(f"Unexpected error: {error}")
+            raise
 
 
 if __name__ == "__main__":
