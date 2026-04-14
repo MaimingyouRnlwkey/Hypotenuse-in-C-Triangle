@@ -53,6 +53,12 @@ string outstream(string buffer, string path) {
     return result;
 }
 
+int cstream(string path) {
+    int fd = open(path, O_CREAT | O_WRONLY);
+    if (fd < 0 || !exists@streams(path)) { return NULL; }
+    return fd;
+}
+
 string instream(string path) {
     int fd = open_file@streams(path);
     if (fd < 0 || !exists@streams(path)) { 
