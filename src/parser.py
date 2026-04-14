@@ -399,6 +399,8 @@ _TYPE_TOKENS = (
     "UNKNOWN",
     "SIZE_T",
     "NORETURN",
+    "STRING",
+    "DYNAM",
 )
 _BASE_TYPE_TOKENS = (
     "INT",
@@ -518,6 +520,10 @@ class Parser:
 
     def _parse_local_declaration(self) -> Node:
         """Parse a local variable declaration inside a function."""
+        # Handle qualifiers before base type: volatile string*, const int*
+        qualifiers = []
+        while self.peek()[0] in ("CONST", "VOLATILE"):
+            qualifiers.append(self.advance()[1])
         typ = self.advance()[1]
 
         # Special handling for dynam type: "dynam <element_type>"
@@ -563,14 +569,17 @@ class Parser:
                 typ2 = self.advance()[1]
                 typ = f"{typ} {typ2}"
 
-        # Handle string type - just use "string" as the type
+        # Prepend qualifiers to type
+        if qualifiers:
+            typ = " ".join(qualifiers) + " " + typ
+        # Handle string type - allow pointer to string
         if typ == "string":
-            # string type doesn't need pointer stars, just return
-            pass
+            typ = self._consume_pointer_stars(typ)
         elif typ.startswith("dynam "):
-            # dynam type: don't add pointer stars to the dynam itself
-            # (the element type inside dynam can have pointers if needed)
-            pass
+            # dynam type: check for pointer to dynam or dynam of pointers
+            # "dynam int*" = dynam array of int pointers
+            # "dynam int**" = dynam array of pointers to pointers
+            typ = self._consume_pointer_stars(typ)
         else:
             typ = self._consume_pointer_stars(typ)
 
@@ -740,25 +749,8 @@ class Parser:
         if t[0] == "SPACE":
             return self.parse_space()
 
-        # Handle extern "C" { } - skip entirely (C doesn't need linkage specifiers)
         if t[0] == "EXTERN":
-            next_tok = (
-                self.tokens[self.i + 1] if self.i + 1 < len(self.tokens) else None
-            )
-            if next_tok and next_tok[0] == "STRING_LITERAL" and next_tok[1] == '"C"':
-                self.advance()  # skip extern
-                self.advance()  # skip "C"
-                if self.peek()[0] == "LBRACE":
-                    self.advance()  # skip {
-                    depth = 1
-                    while self.i < len(self.tokens) and depth > 0:
-                        if self.peek()[0] == "LBRACE":
-                            depth += 1
-                        elif self.peek()[0] == "RBRACE":
-                            depth -= 1
-                        self.advance()
-                return None
-            # Not extern "C" - fall through
+            return self.parse_extern_c_block()
 
         if t[0] == "TYPEDEF":
             return self.parse_typedef()
@@ -794,9 +786,16 @@ class Parser:
                             fallback=f"Unexpected identifier at line {line}, column {col}: '{t[1]}'",
                         )
                     )
+            # Handle qualifiers before base type: volatile string*, const int*
+            qualifiers = []
+            while self.peek()[0] in ("CONST", "VOLATILE"):
+                qualifiers.append(self.advance()[1])
             typ = self.advance()[1]
             if typ in self._typedefs:
                 typ = self._typedefs[typ]
+            # Prepend qualifiers to type
+            if qualifiers:
+                typ = " ".join(qualifiers) + " " + typ
             # Handle storage class specifiers (extern, static, auto, register)
             # These are consumed but not added to the type
             while self.peek()[0] in ("EXTERN", "STATIC", "AUTO", "REGISTER"):
@@ -896,6 +895,7 @@ class Parser:
 
             # Global variable
             array_size = None
+            full_dims = None
             sizes = []
             while self.accept("LBRACKET"):
                 if self.peek()[0] == "RBRACKET":
@@ -1126,24 +1126,37 @@ class Parser:
                 else:
                     namespace = self.expect("IDENTIFIER")[1]
                 target = f"{target}@{namespace}"
-            self.expect("SEMICOLON")
+            # Semicolon is optional for expose statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
             return ExposeDecl(target=target)
         elif t[0] == "PLSTD":
             self.advance()
-            self.expect("SEMICOLON")
+            # Semicolon is optional for expose statements
+            if self.peek()[0] == "SEMICOLON":
+                self.expect("SEMICOLON")
             return ExposeDecl(target="plstd")
 
         return None
 
     def parse_extern_c_block(self):
-        """Skip contents of extern \"C\" { } block (no-op in C)."""
+        """Skip contents of extern "C" { } block (no-op in C)."""
+        self.advance()  # skip extern
+        self.advance()  # skip "C"
+        if self.peek()[0] != "LBRACE":
+            return None
+        self.advance()  # skip {
+        depth = 1
         while self.peek()[0] != "EOF":
-            if self.peek()[0] == "RBRACE":
-                self.expect("RBRACE")
-                break
-            # Skip each token until we hit the closing brace
+            if self.peek()[0] == "LBRACE":
+                depth += 1
+            elif self.peek()[0] == "RBRACE":
+                depth -= 1
+                if depth == 0:
+                    self.advance()  # skip closing }
+                    return None
             self.advance()
-        return None  # Return None - extern "C" block is ignored in C
+        raise SyntaxError("Unclosed extern \"C\" block - missing '}'")
 
     def parse_space(self) -> SpaceDecl:
         """Parse a namespace block declaration."""
@@ -1157,7 +1170,11 @@ class Parser:
                 if self.peek()[0] == "RBRACE":
                     self.advance()
                     break
-                declarations.append(self.parse_external())
+                if self.peek()[0] == "EOF" or self.i >= len(self.tokens):
+                    raise SyntaxError(f"Unexpected end of input inside space '{name}'")
+                node = self.parse_external()
+                if node is not None:
+                    declarations.append(node)
             return SpaceDecl(name=name, declarations=declarations)
         else:
             line = t[2] if len(t) > 2 else 0
@@ -1325,6 +1342,7 @@ class Parser:
                     else:
                         while True:
                             type_qualifiers = []
+                            # Handle qualifiers before base type
                             while self.peek()[0] in ("CONST", "VOLATILE"):
                                 type_qualifiers.append(self.advance()[1])
                             ptype = self.advance()[1]
@@ -1528,6 +1546,9 @@ class Parser:
 
         # Handle type declarations (including size_t and system types like mode_t, uid_t, etc.)
         if t[0] in _BASE_TYPE_TOKENS:
+            return self._parse_local_declaration()
+        # Handle qualifiers (const, volatile) before type: volatile int* x;
+        if t[0] in ("CONST", "VOLATILE"):
             return self._parse_local_declaration()
         # Handle storage class specifiers at statement level (e.g., extern void foo())
         if t[0] in ("EXTERN", "STATIC", "AUTO", "REGISTER"):
@@ -2240,7 +2261,7 @@ class Parser:
                 deref = Unary(op="*", operand=node, prefix=True)
                 node = FieldAccess(deref, field_name)
             elif self.peek()[0] == "AT":
-                # Namespace access: namespace@symbol
+                # Namespace access: namespace@symbol or func@lib
                 # Only valid when node is a Var (identifier)
                 if not isinstance(node, Var):
                     break
@@ -2252,7 +2273,13 @@ class Parser:
                     node = Var(f"{node.name}@@{symbol}")
                 else:
                     # Single @ - treat as namespace prefix
-                    symbol = self.expect("IDENTIFIER")[1]
+                    # Accept IDENTIFIER or LIB as namespace
+                    if self.peek()[0] == "IDENTIFIER":
+                        symbol = self.expect("IDENTIFIER")[1]
+                    elif self.peek()[0] == "LIB":
+                        symbol = self.expect("LIB")[1]
+                    else:
+                        raise SyntaxError("Expected identifier or 'lib' after '@'")
                     node = Var(f"{node.name}@{symbol}")
             else:
                 break
@@ -2369,13 +2396,13 @@ class Parser:
                 # This is function@namespace pattern
                 func_name = self.advance()[1]
                 self.expect("AT")
-                # Namespace can be IDENTIFIER or LIB (for lib)
+                # Namespace can be IDENTIFIER or LIB
                 if self.peek()[0] == "IDENTIFIER":
                     namespace = self.advance()[1]
                 elif self.peek()[0] == "LIB":
                     namespace = self.advance()[1]
                 else:
-                    namespace = self.expect("IDENTIFIER")[1]
+                    raise SyntaxError("Expected identifier or 'lib' after '@'")
                 return Var(f"{func_name}@{namespace}")
 
         if tok[0] == "IDENTIFIER":
@@ -2483,7 +2510,16 @@ _orig_parse_program = Parser.parse_program
 def _parse_program_unwrap(self) -> Program:
     decls_raw = []
     while self.peek()[0] != "EOF":
+        prev_i = self.i
+        if prev_i >= len(self.tokens):
+            break
         node = self.parse_external()
+        if node is None:
+            if self.i == prev_i and self.i < len(self.tokens):
+                self.advance()
+            continue
+        if self.i == prev_i:
+            raise SyntaxError(f"Parser stuck at token: {self.peek()}")
         if isinstance(node, _MultiDecl):
             decls_raw.extend(node.decls)
         else:

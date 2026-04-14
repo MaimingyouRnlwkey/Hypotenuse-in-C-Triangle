@@ -1,8 +1,8 @@
 """C11 code generator for C△ compiler."""
 
 import os
-import sys
 
+import error_msgs
 from parser import (
     Function,
     Declaration,
@@ -67,8 +67,7 @@ class CodeGen:
         self._specific_imports = {}  # item -> (lib_name, namespace)
         self._current_alias = {}  # lib_name -> alias
         self._generating_plib = False  # Flag to bypass checks when generating plib code
-        self._plstd_functions = set()  # Dynamically tracked plstd functions
-        self._plstd_exposed = False  # Whether plstd has been exposed
+        self._current_lib_name = None  # Current library name for function prefixing
         self._exposed_libs = set()  # Set of exposed library names
         self._collected_includes = set()
         # Track generated dynam helper functions and structs to avoid duplicates
@@ -77,17 +76,58 @@ class CodeGen:
         self._helper_lines = []  # Store dynam helper functions
         self._dynam_declarations = {}  # Track dynam/string declarations by name -> type
         self._len_int_generated = False  # Track if len_int helper has been generated
+        self._current_space = None  # Current space name when generating inside a space
+        self._space_local_functions = set()  # Functions defined in current space
+        self._space_prefix_map = {}  # Maps space name -> actual prefix (e.g., "math" -> "lib_math")
+        self._alias_to_lib = {}  # Maps alias (e.g., "lib") -> actual lib name (e.g., "mylib")
+        self._top_level_lib_functions = {}  # Maps lib_name -> set of top-level function names
+        self._exposed_funcs = {}  # Maps bare_name -> lib_name for exposed functions
+        self._folder_libs = {}  # Maps folder alias -> list of plib names (e.g., "lib" -> ["plstd/streamer", "plstd/other"])
+        self._used_functions = set()  # Track used function names for tree-shaking
+        self._pending_plibs = []  # Store pending plib ASTs for tree-shaking
+        self._global_dynam_inits = []  # Track global dynam initialization code for main()
+        self._plib_global_inits = []  # Track global dynam inits for plib init function
+        self._plib_init_funcs = []  # Track plib init function names to auto-call
+        self._imported_plib_inits = []  # Track init funcs from imported plibs
+        self._plib_inits_called = (
+            False  # Track if plib inits have been called in main()
+        )
+        self._in_global_scope = True  # Track if we're at global scope
+        self._dynam_inits_inserted = (
+            False  # Track if global dynam inits have been inserted
+        )
+        self._is_plib_source = source_path and source_path.endswith(
+            ".plib"
+        )  # Direct plib compilation
 
     def generate(self) -> str:
         """Main entry point. Returns generated C code as string."""
         self._lines = []
-        self._gen_program(self.ast)
+
+        # First, collect plib info and process imports (which populates _top_level_lib_functions)
+        self._gen_imports()
+
+        # Emit collected includes at the very beginning
+        includes_to_emit = []
+        for inc in sorted(self._collected_includes):
+            includes_to_emit.append(inc)
+        # We'll prepend includes later after all code is generated
+
+        # Generate main program code
+        self._gen_program_code(self.ast)
+
+        # Emit pending plibs with tree-shaking (after main program, but prepend includes)
+        self._emit_pending_plibs()
+
+        # Prepend includes before any existing code
+        self._lines = includes_to_emit + self._lines
 
         # Always ensure required includes are present
         needs_stdlib = (
             self._len_int_generated
             or "malloc" in "\n".join(self._lines)
             or "free" in "\n".join(self._lines)
+            or "realloc" in "\n".join(self._lines)
         )
         needs_string = (
             "strlen" in "\n".join(self._lines)
@@ -165,13 +205,31 @@ class CodeGen:
         """Map C△ type to C type."""
         if not typ:
             return typ
+
+        # Handle pointer types: strip trailing * and map base, then add * back
+        pointer_suffix = ""
+        while typ.endswith("*"):
+            typ = typ[:-1].strip()
+            pointer_suffix += "*"
+
+        # Handle qualifiers: volatile string*, const int*, etc.
+        qualifier = ""
+        for q in ("volatile ", "const "):
+            if typ.startswith(q):
+                qualifier = q.strip() + " "
+                typ = typ[len(q) :]
+                break
+
         if typ.startswith("dynam "):
             typ = typ[6:]  # Strip "dynam " (6 chars)
         if typ.startswith("tuple "):
             typ = typ[6:]
         if typ == "string":
-            return "char*"
-        return TYPE_MAP.get(typ, typ)
+            mapped = "char*"
+        else:
+            mapped = TYPE_MAP.get(typ, typ)
+
+        return qualifier + mapped + pointer_suffix
 
     def _get_dynam_type(self, var_name: str) -> str:
         """Get the type of a variable if it's dynam or string."""
@@ -269,29 +327,47 @@ class CodeGen:
             if node.op == "+":
                 left_type = self._get_expression_type(node.left)
                 right_type = self._get_expression_type(node.right)
+                left_is_string = left_type == "string" or (
+                    isinstance(node.left, Literal)
+                    and isinstance(node.left.value, str)
+                    and node.left.value.startswith('"')
+                )
+                right_is_string = right_type == "string" or (
+                    isinstance(node.right, Literal)
+                    and isinstance(node.right.value, str)
+                    and node.right.value.startswith('"')
+                )
+
+                # string + integer is pointer arithmetic, not concatenation
+                def is_numeric_literal(node):
+                    """Check if a Literal node contains a numeric value."""
+                    if isinstance(node, Literal):
+                        val = node.value
+                        if isinstance(val, int):
+                            return True
+                        if isinstance(val, str):
+                            try:
+                                int(val)
+                                return True
+                            except:
+                                pass
+                    return False
+
+                if left_is_string and is_numeric_literal(node.right):
+                    left_is_string = False
+                if right_is_string and is_numeric_literal(node.left):
+                    right_is_string = False
 
                 # If either operand is a string or string literal, treat as concatenation
-                if (
-                    left_type == "string"
-                    or right_type == "string"
-                    or (
-                        isinstance(node.left, Literal)
-                        and isinstance(node.left.value, str)
-                        and node.left.value.startswith('"')
-                    )
-                    or (
-                        isinstance(node.right, Literal)
-                        and isinstance(node.right.value, str)
-                        and node.right.value.startswith('"')
-                    )
-                ):
+                if left_is_string or right_is_string:
                     left_expr = self._expr(node.left)
                     right_expr = self._expr(node.right)
 
-                    # Generate concatenation: malloc + strcpy + strcat
-                    # We need to return an expression that evaluates to the concatenated string
-                    # Use a statement-like approach that will be handled by the caller
-                    return f"(char*)0 /* STRING_CONCAT_PLACEHOLDER: {left_expr} + {right_expr} */"
+                    # String concatenation not yet implemented for expressions
+                    raise NotImplementedError(
+                        "String concatenation in expressions is not yet implemented. "
+                        "Use separate string variables and strcpy/strcat manually."
+                    )
 
             left = self._expr(node.left)
             right = self._expr(node.right)
@@ -396,11 +472,20 @@ class CodeGen:
                     # If obj_expr is a simple variable name, use it
                     if isinstance(node.callee.obj, Var):
                         var_name = node.callee.obj.name
-                        # We still need the element type - for now, we'll use a generic approach
-                        # In practice, we'd look up the variable's type in the symbol table
-                        # For this implementation, we'll assume int type for testing
-                        elem_type = "int"  # TODO: Get actual type from symbol table
-                        struct_name = f"dynam_{elem_type}"
+                        # Look up the variable's type in our tracking dict
+                        if var_name in self._dynam_declarations:
+                            dyn_type = self._dynam_declarations[var_name]
+                            if dyn_type.startswith("dynam "):
+                                elem_type = dyn_type[6:]  # Remove "dynam " prefix
+                                struct_name = self._get_dynam_struct_name(elem_type)
+                            elif dyn_type == "string":
+                                # For string, we need to treat as dynam char for push/pop/len
+                                elem_type = "char"
+                                struct_name = self._get_dynam_struct_name(elem_type)
+                        else:
+                            # Fallback to int if not found (shouldn't happen in valid code)
+                            elem_type = "int"
+                            struct_name = self._get_dynam_struct_name(elem_type)
 
                         if method_name == "push":
                             # arr.push(val) -> dynam_int_push(&arr, val)
@@ -480,7 +565,7 @@ class CodeGen:
                                 dyn_type = self._dynam_declarations[var_name]
                                 if dyn_type.startswith("dynam "):
                                     elem_type = dyn_type[6:]
-                                    struct_name = f"dynam_{elem_type}"
+                                    struct_name = self._get_dynam_struct_name(elem_type)
                                     return f"{struct_name}_len(&{var_name})"
                                 elif dyn_type == "string":
                                     return f"strlen({var_name})"
@@ -502,48 +587,37 @@ class CodeGen:
                     else self._expr(node.callee)
                 )
 
-            # FIRST: Check if library is exposed
-            # If exposed: printd@lib prefix is allowed but optional (strip it)
-            # If NOT exposed: printd@lib prefix IS required for plstd functions
-            # Skip this check when generating plib code itself
-            # Check both the plstd flag and exposed_libs set for backwards compatibility
-            plstd_exposed = (
-                hasattr(self, "_plstd_exposed") and self._plstd_exposed
-            ) or (hasattr(self, "_exposed_libs") and "plstd" in self._exposed_libs)
-            if not self._generating_plib and plstd_exposed:
-                # plstd is exposed - allow both direct call and printd@lib prefix
-                actual_callee = callee
-                if "@lib" in callee:
-                    actual_callee = callee.split("@")[0]
-                if actual_callee in self._plstd_functions:
-                    callee = actual_callee
-            elif not self._generating_plib and not plstd_exposed:
-                # plstd not exposed - printd@lib prefix IS required for plstd functions
-                actual_callee = callee
-                if "@lib" in callee:
-                    actual_callee = callee.split("@")[0]
-                if actual_callee in self._plstd_functions:
-                    if "@lib" not in callee:
-                        raise ValueError(
-                            f"Function '{actual_callee}' requires '{actual_callee}@lib()' syntax (plstd not exposed)."
-                        )
-                    callee = actual_callee
+                # Handle space-local function calls: if we're inside a space and calling
+                # a function defined in that space, prefix with the space name
+                if self._current_space and callee in self._space_local_functions:
+                    callee = f"{self._current_space}_{callee}"
 
             # Handle specific imports: using sin from <math> -> math_sin()
             # AND intra-file scoped imports: using X&Y -> map Y to X_Y
-            # This must run BEFORE namespace transformation so "printd@lib" can match "printd"
+            # This must run BEFORE namespace transformation so "func@lib" can match "func"
             base_callee = callee.split("@")[0] if "@" in callee else callee
+            func_from_unexposed_lib = False
             if (
                 hasattr(self, "_specific_imports")
                 and base_callee in self._specific_imports
             ):
                 lib_name, func_name = self._specific_imports[base_callee]
-                # Check if this is an intra-file scoped import (scope chain has &)
-                # OR it's a simple scoped import (single scope name without &)
-                # OR it's an alias (lib_name == func_name means alias was used)
-                # Both need transformation: foo&bar -> foo_bar, main&helper -> main_helper
-                # But alias: use directly
-                if "&" in str(lib_name):
+                # Check if this library is exposed - if not, require @ prefix
+                is_exposed = lib_name in getattr(self, "_exposed_libs", set())
+                if not is_exposed and "@" not in callee:
+                    raise ValueError(
+                        error_msgs.get_error_msg(
+                            "E802",
+                            lib=lib_name,
+                            func=base_callee,
+                            fallback=f"Function '{base_callee}' requires '{base_callee}@{lib_name}()' syntax (library not exposed). Use 'expose {lib_name}' before calling.",
+                        )
+                    )
+                # If func_name is None or equals base_callee, no transformation needed
+                # The function is already named correctly (top-level function)
+                if func_name is None or func_name == base_callee:
+                    pass  # callee stays as-is
+                elif "&" in str(lib_name):
                     # Chain like a&b&c - transform
                     scope_chain = lib_name
                     callee = scope_chain.replace("&", "_") + "_" + func_name
@@ -552,35 +626,127 @@ class CodeGen:
                     pass  # callee stays as-is (already matches)
                 else:
                     # Single scope like foo - transform to foo_bar
-                    # OR plstd specific import: printd from <plstd> -> plstd_printd
-                    if lib_name == "plstd":
-                        # func_name is already the generated name like "plstd_printd"
-                        callee = func_name
-                    else:
-                        callee = lib_name + "_" + func_name
+                    callee = lib_name + "_" + func_name
 
-            # Handle user namespace prefix like "helper@mylib" -> "mylib_helper"
-            # Check AFTER specific imports since both may contain "@"
-            elif "@" in callee and "@lib" not in callee:
-                # Convert user namespace access to prefixed function name
-                # Space generates: namespace_func, so call should be namespace_func
+            # Check if calling a function from an imported but unexposed plib
+            # without using @ syntax (skip when generating plib code itself)
+            elif (
+                not getattr(self, "_generating_plib", False)
+                and base_callee not in getattr(self, "_specific_imports", {})
+                and base_callee not in getattr(self, "_space_local_functions", set())
+                and "@" not in callee
+            ):
+                # First check if function is exposed - if so, resolve to prefixed name
+                exposed_funcs = getattr(self, "_exposed_funcs", {})
+                if base_callee in exposed_funcs:
+                    # Exposed function - resolve to prefixed name (already includes func name)
+                    prefixed_lib = exposed_funcs[base_callee]
+                    callee = f"{prefixed_lib}_{base_callee}"
+                else:
+                    # Check if function exists in any imported plib's top-level functions
+                    for lib_name, funcs in getattr(
+                        self, "_top_level_lib_functions", {}
+                    ).items():
+                        if base_callee in funcs:
+                            raise ValueError(
+                                error_msgs.get_error_msg(
+                                    "E802",
+                                    lib=lib_name,
+                                    func=base_callee,
+                                    fallback=f"Function '{base_callee}' requires '{base_callee}@{lib_name}()' syntax (library '{lib_name}' not exposed). Use 'expose {base_callee}@{lib_name}' before calling.",
+                                )
+                            )
+
+            # When generating plib code, prefix internal calls to other plib functions
+            elif getattr(self, "_generating_plib", False) and "@" not in callee:
+                top_level_funcs = getattr(self, "_top_level_lib_functions", {})
+                current_lib = getattr(self, "_current_lib_name", None)
+                if current_lib and current_lib in top_level_funcs:
+                    if base_callee in top_level_funcs[current_lib]:
+                        callee = f"{current_lib}_{base_callee}"
+
+            # Handle namespace prefix like "func@lib" or "func@space" -> "prefix_func"
+            # @ is for calling space-local functions or top-level library functions
+            elif "@" in callee:
                 parts = callee.split("@")
                 if len(parts) == 2:
                     func, namespace = parts
-                    callee = f"{namespace}_{func}"
-            # Handle plstd namespace prefix like "printd@lib" -> "plstd_printd"
-            # (only if not handled by specific imports above)
-            elif "@lib" in callee:
-                parts = callee.split("@")
-                if len(parts) == 2:
-                    func, namespace = parts
-                    callee = f"{namespace}_{func}"
+                    # Check if this is a space-local function (preferred)
+                    if namespace in self._space_prefix_map:
+                        actual_prefix = self._space_prefix_map[namespace]
+                        callee = f"{actual_prefix}_{func}"
+                    elif namespace in self._alias_to_lib:
+                        # @lib or other valid alias
+                        actual_lib = self._alias_to_lib[namespace]
+                        found = False
+                        # Check direct match first
+                        if (
+                            actual_lib in self._top_level_lib_functions
+                            and func in self._top_level_lib_functions[actual_lib]
+                        ):
+                            callee = f"{actual_lib}_{func}"
+                            found = True
+                        else:
+                            # Search through folder plibs (e.g., plstd_streamer)
+                            for lib_key, funcs in self._top_level_lib_functions.items():
+                                if (
+                                    lib_key.startswith(f"{actual_lib}_")
+                                    and lib_key != actual_lib
+                                    and func in funcs
+                                ):
+                                    callee = f"{lib_key}_{func}"
+                                    found = True
+                                    break
+                        if not found:
+                            raise ValueError(
+                                error_msgs.get_error_msg(
+                                    "E803",
+                                    func=func,
+                                    lib=actual_lib,
+                                    fallback=f"Function '{func}' not found in library '{actual_lib}'. Use '{func}()' directly if it's a top-level function.",
+                                )
+                            )
+                    elif namespace in self._top_level_lib_functions:
+                        # Direct lib name like @streamer
+                        if func in self._top_level_lib_functions[namespace]:
+                            # Use prefixed name to avoid conflicts with system headers
+                            callee = f"{namespace}_{func}"
+                        else:
+                            raise ValueError(
+                                error_msgs.get_error_msg(
+                                    "E803",
+                                    func=func,
+                                    lib=namespace,
+                                    fallback=f"Function '{func}' not found in library '{namespace}'.",
+                                )
+                            )
+                    else:
+                        # Invalid alias
+                        raise ValueError(
+                            error_msgs.get_error_msg(
+                                "E804",
+                                alias=namespace,
+                                fallback=f"Invalid alias '{namespace}'. Library not imported or does not exist.",
+                            )
+                        )
+            # Track this function call for tree-shaking plibs
+            self._used_functions.add(base_callee)
+            # Also track prefixed name for @libname calls (function generated as lib_func)
+            if "@" in callee and callee != base_callee:
+                self._used_functions.add(callee)
             args = ", ".join(self._expr(a) for a in node.args)
             return f"{callee}({args})"
 
         if isinstance(node, ArrayAccess):
             arr = self._expr(node.array)
             idx = self._expr(node.index)
+            # Check if this is a dynam array subscript
+            if isinstance(node.array, Var):
+                var_name = node.array.name
+                dyn_type = self._get_dynam_type(var_name)
+                if dyn_type and dyn_type.startswith("dynam "):
+                    # Dynam array: arr[idx] -> arr.data[idx]
+                    return f"{arr}.data[{idx}]"
             return f"{arr}[{idx}]"
 
         if isinstance(node, Cast):
@@ -634,6 +800,12 @@ class CodeGen:
     def _gen_program(self, node):
         # First collect all includes from user file and all plib dependencies
         self._gen_imports()
+        # Now generate main program code
+        self._gen_program_code(node)
+        # Emit pending plibs with tree-shaking
+        self._emit_pending_plibs()
+
+    def _gen_program_code(self, node):
         # Now emit collected includes at the very beginning (prepend)
         includes_to_emit = []
         for inc in sorted(self._collected_includes):
@@ -645,17 +817,50 @@ class CodeGen:
             if isinstance(decl, SpaceDecl):
                 # Handle SpaceDecl in main file - generate nested declarations with prefix
                 prefix = decl.name
+                # Track space name -> prefix mapping for @space calls
+                self._space_prefix_map[decl.name] = prefix
+                # Track current space for function call prefixing
+                old_space = self._current_space
+                old_local_funcs = self._space_local_functions.copy()
+                self._current_space = decl.name
+                self._space_local_functions = set()
                 for nested in decl.declarations:
                     if isinstance(nested, Function):
                         nested.name = f"{prefix}_{nested.name}"
+                        # Track original name for call prefixing
+                        self._space_local_functions.add(
+                            nested.name.replace(f"{prefix}_", "")
+                        )
                     elif isinstance(nested, Declaration):
                         nested.name = f"{prefix}_{nested.name}"
                     self._gen_node(nested)
+                # Restore previous space context
+                self._current_space = old_space
+                self._space_local_functions = old_local_funcs
             elif not isinstance(decl, (UsingDecl, ExposeDecl)):
                 # Skip Include/Define - they were collected in _gen_imports via _collect_include
                 if isinstance(decl, (Include, Define)):
                     continue
                 self._gen_node(decl)
+
+        # Generate plib init function for global dynam arrays (direct plib compilation)
+        if self._is_plib_source and self._plib_global_inits:
+            # Extract base name from source path (e.g., /tmp/test.plib -> test)
+            import os
+
+            base_name = os.path.basename(self.source_path)
+            if base_name.endswith(".plib"):
+                safe_name = base_name[:-5]  # Remove .plib extension
+            else:
+                safe_name = base_name
+            safe_name = safe_name.replace("/", "_").replace("-", "_")
+            self._emit("")
+            self._emit(f"void {safe_name}_init(void) {{")
+            for init_line, push_lines in self._plib_global_inits:
+                self._emit(f"    {init_line}")
+                for p_line in push_lines:
+                    self._emit(f"    {p_line}")
+            self._emit(f"}}")
 
     def _emit_collected_includes(self):
         for inc in sorted(self._collected_includes):
@@ -688,19 +893,17 @@ class CodeGen:
 
         for imp in imports:
             source = imp.source
+
             if source.startswith("<") and source.endswith(">"):
-                # Treat <lib> as a plib lookup, not a system header
                 lib_name = source[1:-1]
-                actual_path = f"plstd/{lib_name}"
 
                 if lib_name not in seen_libs:
-                    local_imports.append(actual_path)
+                    local_imports.append(lib_name)
                     seen_libs.add(lib_name)
                 if imp.alias:
-                    alias_map[imp.alias] = (actual_path, "local")
+                    alias_map[imp.alias] = (lib_name, "local")
                 if imp.item:
-                    # Track specific imports: using sin from <math>
-                    specific_imports[imp.item] = actual_path
+                    specific_imports[imp.item] = lib_name
             elif "&" in source:
                 # Handle intra-file scoped imports: using X&Y or using a&b&c&Y
                 # This imports a symbol Y from scope X (chain of scopes)
@@ -748,146 +951,197 @@ class CodeGen:
                     break
             if alias:
                 self._current_alias[lib_name] = alias
+                self._alias_to_lib[alias] = lib_name
+            # "lib" is an alias for the standard library (plstd)
+            if lib_name == "plstd" and "lib" not in self._alias_to_lib:
+                self._alias_to_lib["lib"] = "plstd"
+                # When using <plstd>, also scan folder for all plibs
+                self._scan_plib_folder("plstd")
             # Only collect includes from plib (don't generate code yet)
             self._collect_plib_includes(lib_name)
 
-        # Now generate plib code after all includes are collected
+        # Collect plib info for tree-shaking (generate later after main program)
         for lib_name in local_imports:
             alias = self._current_alias.get(lib_name)
-            self._gen_plib_code(lib_name, alias)
+            self._collect_plib_for_tree_shake(lib_name, alias)
 
         for exp in exposes:
             # Check if the library was imported first
-            # Normalize: both <plstd> and "plstd" should match "plstd"
             exp_target = exp.target
 
-            # Handle @ syntax: expose printd@plstd exposes a specific item from a library
+            # Handle @ syntax: expose func@lib exposes a specific item from a library
             if "@" in exp_target:
                 func_name, lib_name = exp_target.rsplit("@", 1)
+                # Resolve lib alias to actual library name
+                actual_lib = self._alias_to_lib.get(lib_name, lib_name)
 
-                # Special case: "lib" is an alias for "plstd"
-                # So expose printd@lib should work if <plstd> was imported
-                check_libs = [lib_name]
-                if lib_name == "lib":
-                    check_libs.append("plstd")
-
-                # Check if any of the potential libraries was imported
-                # Also check for path-based imports like <plstd/printd>
+                # Check if the library was imported
                 lib_imported = any(
                     (imp.source == l)
                     or (imp.source == f"<{l}>")
                     or (imp.source == f'"{l}"')
-                    # Also check path-based imports: <plstd/printd> imports plstd
                     or (imp.source.startswith(f"<{l}/"))
                     for imp in imports
-                    for l in check_libs
+                    for l in [lib_name, actual_lib]
                 )
-                # Also check if specific function was imported (using printd from <plstd>)
+                # Also check if specific function was imported
                 func_imported = any(imp.item == func_name for imp in imports)
-                # Either library imported OR specific function imported is fine
                 if not lib_imported and not func_imported:
                     raise ValueError(
-                        f"Cannot expose '{exp.target}' - library must be imported first. "
-                        f"Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it."
+                        error_msgs.get_error_msg(
+                            "E801",
+                            lib=lib_name,
+                            item=func_name,
+                            fallback=f"Cannot expose '{exp.target}' - library must be imported first. Use: using <{lib_name}> or using {func_name} from <{lib_name}> before exposing it.",
+                        )
                     )
-                # Track that this library is now exposed (using generic set)
-                # Special case: "lib" is an alias for "plstd"
-                if lib_name == "lib":
-                    self._plstd_exposed = True
                 self._exposed_libs.add(lib_name)
-                self._exposed_libs.add(exp.target)
+                self._exposed_libs.add(actual_lib)
+                # Track exposed function: bare_name -> (lib_name, full_prefixed_name)
+                # Find the actual lib key in _top_level_lib_functions
+                prefixed_lib = actual_lib  # Default
+                for lib_key in self._top_level_lib_functions:
+                    # Check if this is a folder plib (e.g., plstd_printd from plstd/printd)
+                    if lib_key.replace("_", "/").endswith(
+                        f"/{func_name}"
+                    ) or lib_key.endswith(f"_{func_name}"):
+                        if func_name in self._top_level_lib_functions[lib_key]:
+                            prefixed_lib = lib_key
+                            break
+                self._exposed_funcs[func_name] = prefixed_lib
                 continue
 
             if exp_target.startswith("<") and exp_target.endswith(">"):
                 exp_target = exp.target[1:-1]
 
+            # Normalize: strip .plib extension for comparison
+            exp_base = (
+                exp_target.rsplit(".plib", 1)[0]
+                if ".plib" in exp_target
+                else exp_target
+            )
+
             # Check if the library was imported
-            # OR if this specific item was imported (e.g., using printd from <plstd>)
             lib_imported = any(
                 (imp.source == exp_target)
                 or (imp.source == f"<{exp_target}>")
                 or (imp.source == f'"{exp_target}"')
-                # Check if the specific item was imported
                 or (imp.item == exp_target)
+                # Also check without .plib extension
+                or (imp.source == exp_base)
+                or (imp.source == f"<{exp_base}>")
+                or (imp.source == f'"{exp_base}"')
+                or (
+                    imp.source.rsplit(".plib", 1)[0]
+                    if ".plib" in imp.source
+                    else imp.source
+                )
+                == exp_base
                 for imp in imports
             )
             if not lib_imported:
-                # Also check path-based imports
                 if any(
                     imp.source.startswith(f"<{exp_target}/")
                     or imp.source == f"<{exp_target}>"
                     or imp.source == exp_target
+                    or imp.source.startswith(f"<{exp_base}/")
+                    or imp.source == f"<{exp_base}>"
+                    or imp.source == exp_base
                     for imp in imports
                 ):
                     lib_imported = True
             # Track that this library is now exposed
-            if exp.target == "plstd" or exp_target == "plstd":
-                self._plstd_exposed = True
-            elif exp.target.startswith("<") and exp.target.endswith(">"):
-                lib_name = exp.target[1:-1]
-                self._exposed_libs.add(lib_name)
-            else:
-                self._exposed_libs.add(exp.target)
+            self._exposed_libs.add(exp_target)
+            self._exposed_libs.add(exp_base)
 
-    def _gen_plib_code(self, lib_name: str, alias: str = None):
+    def _gen_plib_code(
+        self, lib_name: str, alias: str = None, plib_ast: "p.Program" = None
+    ):
         """Generate code from a local plib file."""
         import os
         import lexer
         import parser as p
 
-        # Bypass the plstd check when generating plib code itself
+        # Bypass checks when generating plib code itself
         old_generating = self._generating_plib
+        old_imported_inits = list(self._imported_plib_inits)  # Save imported plib inits
+        old_lib_name = self._current_lib_name
         self._generating_plib = True
+        # Use full lib_name with slashes replaced for prefixing (e.g., plstd/streamer -> plstd_streamer)
+        self._current_lib_name = lib_name.replace("/", "_")
+        self._imported_plib_inits = []  # Reset for this plib's imports
+        seen_libs = {lib_name}  # Track which plibs we've processed in this chain
 
-        plib_path = None
-        search_name = lib_name.split("/")[-1]
+        # If AST wasn't provided, parse the file
+        if plib_ast is None:
+            plib_path = None
+            search_name = lib_name.split("/")[-1]
 
-        # Always check current directory first
-        current_dir = os.path.dirname(self.source_path) if self.source_path else "."
-        search_paths = [current_dir] + self._get_plibs_search_dirs()
+            # Handle absolute paths directly
+            if os.path.isabs(lib_name):
+                if os.path.exists(lib_name):
+                    plib_path = lib_name
+                elif os.path.exists(f"{lib_name}.plib"):
+                    plib_path = f"{lib_name}.plib"
+            else:
+                # Always check current directory and parent directories
+                current_dir = (
+                    os.path.dirname(self.source_path) if self.source_path else "."
+                )
+                search_paths = [current_dir]
+                parent = os.path.dirname(current_dir)
+            while parent and parent != current_dir:
+                search_paths.append(parent)
+                current_dir = parent
+                parent = os.path.dirname(parent)
+            search_paths.extend(self._get_plibs_search_dirs())
 
-        # Handle path with folder: plstd/printd -> import first .plib in folder
-        if "/" in lib_name:
-            folder = lib_name.split("/")[0]
-            for base in search_paths:
-                folder_path = os.path.join(base, folder)
-                if os.path.isdir(folder_path):
-                    for f in sorted(os.listdir(folder_path)):
-                        if f.endswith(".plib"):
-                            plib_path = os.path.join(folder_path, f)
-                            break
-                    if plib_path:
-                        break
-        else:
-            # First try direct .plib file
-            for base in search_paths:
-                candidate = os.path.join(base, f"{search_name}.plib")
-                if os.path.exists(candidate):
-                    plib_path = candidate
-                    break
-
-            # If no .plib file found, try as folder (import all .plib files in folder)
-            if not plib_path:
+            # Handle path with folder: lib/func -> import first .plib in folder
+            if "/" in lib_name:
+                folder = lib_name.split("/")[0]
                 for base in search_paths:
-                    folder_path = os.path.join(base, search_name)
+                    folder_path = os.path.join(base, folder)
                     if os.path.isdir(folder_path):
-                        # Import first .plib in folder
                         for f in sorted(os.listdir(folder_path)):
                             if f.endswith(".plib"):
                                 plib_path = os.path.join(folder_path, f)
                                 break
                         if plib_path:
                             break
+            else:
+                # First try direct .plib file
+                for base in search_paths:
+                    candidate = os.path.join(base, f"{search_name}.plib")
+                    if os.path.exists(candidate):
+                        plib_path = candidate
+                        break
 
-        if not plib_path:
-            return
+                # If no .plib file found, try as folder (import all .plib files in folder)
+                if not plib_path:
+                    for base in search_paths:
+                        folder_path = os.path.join(base, search_name)
+                        if os.path.isdir(folder_path):
+                            # Import first .plib in folder
+                            for f in sorted(os.listdir(folder_path)):
+                                if f.endswith(".plib"):
+                                    plib_path = os.path.join(folder_path, f)
+                                    break
+                        if plib_path:
+                            break
 
-        with open(plib_path, "r") as f:
-            plib_content = f.read()
+        # If AST wasn't provided and we found a path, parse it
+        if plib_ast is None:
+            if not plib_path:
+                return
 
-        tokens = lexer.Lexer(plib_content).lex()
-        tokens.append(("EOF", "EOF", 0, 0))
-        plib_ast = p.Parser(tokens).parse_program()
+            with open(plib_path, "r") as f:
+                plib_content = f.read()
+
+            tokens = lexer.Lexer(plib_content).lex()
+            tokens.append(("EOF", "EOF", 0, 0))
+            plib_ast = p.Parser(tokens).parse_program()
+
+        # Now plib_ast is available (either passed in or just parsed)
 
         # Collect all includes from the plib (not emit - collected for later)
         for decl in plib_ast.declarations:
@@ -897,15 +1151,25 @@ class CodeGen:
                 # Collect defines into a set too for later deduplication
                 self._collected_includes.add(decl.directive)
 
+        # Recursively generate code for imported plibs first
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.UsingDecl):
+                source = decl.source
+                # Skip system libraries like <plstd>
+                if source.startswith("<") and source.endswith(">"):
+                    continue
+                # Skip if already imported
+                if source in seen_libs:
+                    continue
+                seen_libs.add(source)
+                # Recursively generate the imported plib's code
+                self._gen_plib_code(source, None)
+
         # Determine the prefix to use - alias if provided, else lib_name
-        # For plstd/plstd, use "plstd" as prefix to avoid name conflicts
         if alias:
             prefix = alias
-        elif lib_name.startswith("plstd/"):
-            prefix = "plstd"  # Use "plstd" prefix for plstd/plstd
-            self._plstd_exposed = True  # Auto-expose when importing via folder
         elif "/" in lib_name:
-            # Any other folder import - extract folder name as prefix
+            # Folder import - extract folder name as prefix
             prefix = lib_name.split("/")[0]
             self._exposed_libs.add(prefix)
         else:
@@ -917,7 +1181,6 @@ class CodeGen:
                 continue
 
             # Apply prefix to top-level declarations only if alias is provided
-            # For plstd imports without alias (using printd from <plstd>), don't prefix
             if alias:
                 if isinstance(decl, p.Function):
                     decl.name = f"{prefix}_{decl.name}"
@@ -932,11 +1195,24 @@ class CodeGen:
                 else:
                     actual_prefix = f"{prefix}_{decl.name}"  # e.g., lib_utils_func
 
+                # Track space name -> actual prefix mapping for @space calls
+                # e.g., "math" -> "lib_math"
+                self._space_prefix_map[decl.name] = actual_prefix
+
+                # Track current space for function call prefixing
+                old_space = self._current_space
+                old_local_funcs = self._space_local_functions.copy()
+                self._current_space = actual_prefix
+                self._space_local_functions = set()
+
                 # Update specific imports mapping with actual generated prefix
                 for nested_decl in decl.declarations:
                     if isinstance(nested_decl, p.Function):
+                        original_name = nested_decl.name
                         generated_name = f"{actual_prefix}_{nested_decl.name}"
-                        # Update mapping: printd -> (plstd, plstd_printd)
+                        # Track ORIGINAL name for space-local function call prefixing
+                        self._space_local_functions.add(original_name)
+                        # Update mapping: func -> (lib, lib_func)
                         if nested_decl.name in self._specific_imports:
                             self._specific_imports[nested_decl.name] = (
                                 lib_name.split("/")[-1],
@@ -947,26 +1223,181 @@ class CodeGen:
                     elif isinstance(nested_decl, p.Declaration):
                         nested_decl.name = f"{actual_prefix}_{nested_decl.name}"
                     self._gen_node(nested_decl)
+
+                # Restore previous space context
+                self._current_space = old_space
+                self._space_local_functions = old_local_funcs
             elif isinstance(
                 decl, (p.Function, p.Declaration, p.StructDef, p.Typedef, p.EnumDef)
             ):
+                # Track top-level library functions (not in any space)
+                lib_key = lib_name.split("/")[-1]
+                if isinstance(decl, p.Function):
+                    if lib_key not in self._top_level_lib_functions:
+                        self._top_level_lib_functions[lib_key] = set()
+                    self._top_level_lib_functions[lib_key].add(decl.name)
+
                 # Update specific_imports mapping for this function
                 if isinstance(decl, p.Function) and decl.name in self._specific_imports:
-                    # The decl.name already has the prefix applied (see line ~558)
-                    # Just use it directly
                     self._specific_imports[decl.name] = (
                         lib_name.split("/")[-1],
                         decl.name,
                     )
 
-                # Track plstd functions if we're generating plstd
-                if lib_name.startswith("plstd/") and isinstance(decl, p.Function):
-                    self._plstd_functions.add(decl.name)
+                # Tree-shaking: skip unused top-level functions (unless lib is exposed)
+                lib_key = lib_name.split("/")[-1]
+                is_exposed = lib_key in self._exposed_libs
+                if isinstance(decl, p.Function) and not is_exposed:
+                    prefixed_name = f"{lib_key}_{decl.name}"
+                    if (
+                        decl.name not in self._used_functions
+                        and prefixed_name not in self._used_functions
+                    ):
+                        continue  # Skip unused function
 
                 self._gen_node(decl)
 
+        # Generate plib init function for global dynam arrays if any
+        # Also call init functions for any imported plibs that have globals
+        if self._plib_global_inits or self._imported_plib_inits:
+            safe_name = lib_name.replace("/", "_").replace("-", "_")
+            init_func_name = f"{safe_name}_init"
+            self._emit("")
+            self._emit(f"void {init_func_name}(void) {{")
+            # First call init functions for imported plibs (nested deps)
+            for imported_init in self._imported_plib_inits:
+                self._emit(f"    {imported_init}();")
+            # Then initialize this plib's globals
+            for init_line, push_lines in self._plib_global_inits:
+                self._emit(f"    {init_line}")
+                for p_line in push_lines:
+                    self._emit(f"    {p_line}")
+            self._emit(f"}}")
+            # Only add to _plib_init_funcs if this is a top-level plib (not nested)
+            # Nested plibs' inits are chained via _imported_plib_inits
+            if not old_generating:
+                self._plib_init_funcs.append(init_func_name)
+            # Add this plib's init to parent's imported list
+            self._imported_plib_inits.append(init_func_name)
+            self._plib_global_inits = []  # Clear for next plib
+
         # Restore the flag after generating plib code
         self._generating_plib = old_generating
+        self._current_lib_name = old_lib_name  # Restore library name
+        # Restore imported plib inits for parent's context
+        # Accumulate: parent's inits + this plib's inits
+        self._imported_plib_inits = old_imported_inits + [
+            i for i in self._imported_plib_inits if i not in old_imported_inits
+        ]
+
+    def _collect_plib_for_tree_shake(self, lib_name: str, alias: str = None):
+        """Collect plib AST for tree-shaking - don't generate yet."""
+        import os
+        import lexer
+        import parser as p
+
+        plib_path = None
+        search_name = lib_name.split("/")[-1]
+
+        if os.path.isabs(lib_name):
+            if os.path.exists(lib_name):
+                plib_path = lib_name
+            elif os.path.exists(f"{lib_name}.plib"):
+                plib_path = f"{lib_name}.plib"
+        else:
+            current_dir = os.path.dirname(self.source_path) if self.source_path else "."
+            search_paths = [current_dir]
+            parent = os.path.dirname(current_dir)
+            while parent and parent != current_dir:
+                search_paths.append(parent)
+                current_dir = parent
+                parent = os.path.dirname(parent)
+            search_paths.extend(self._get_plibs_search_dirs())
+
+            for base in search_paths:
+                candidate = os.path.join(base, f"{search_name}.plib")
+                if os.path.exists(candidate):
+                    plib_path = candidate
+                    break
+
+            if not plib_path:
+                # Check if this is a folder containing plibs
+                for base in search_paths:
+                    folder_path = os.path.join(base, search_name)
+                    if os.path.isdir(folder_path):
+                        # Collect ALL plibs in the folder
+                        for f in sorted(os.listdir(folder_path)):
+                            if f.endswith(".plib"):
+                                full_plib_path = os.path.join(folder_path, f)
+                                plib_name = f[:-5]  # Remove .plib extension
+                                full_lib_name = f"{search_name}/{plib_name}"
+                                self._collect_single_plib(
+                                    full_plib_path, full_lib_name, alias
+                                )
+                        return  # All plibs collected, return
+
+        if not plib_path:
+            return
+
+        self._collect_single_plib(plib_path, lib_name, alias)
+
+    def _collect_single_plib(self, plib_path: str, lib_name: str, alias: str = None):
+        """Collect a single plib file for tree-shaking."""
+        import lexer
+        import parser as p
+
+        with open(plib_path, "r") as f:
+            plib_content = f.read()
+
+        tokens = lexer.Lexer(plib_content).lex()
+        tokens.append(("EOF", "EOF", 0, 0))
+        plib_ast = p.Parser(tokens).parse_program()
+
+        # Collect includes from the plib
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Include):
+                self._collect_include(decl)
+            elif isinstance(decl, p.Define):
+                self._collected_includes.add(decl.directive)
+
+        # Pre-populate _top_level_lib_functions so @ syntax works
+        # Use full path for folder plibs (e.g., plstd/streamer)
+        lib_key = lib_name
+        for decl in plib_ast.declarations:
+            if isinstance(decl, p.Function):
+                if lib_key not in self._top_level_lib_functions:
+                    self._top_level_lib_functions[lib_key] = set()
+                self._top_level_lib_functions[lib_key].add(decl.name)
+
+        self._pending_plibs.append(
+            {
+                "lib_name": lib_name,
+                "alias": alias,
+                "ast": plib_ast,
+            }
+        )
+
+    def _emit_pending_plibs(self):
+        """Emit pending plib code with tree-shaking."""
+        plib_lines = []
+        for plib_info in self._pending_plibs:
+            # Temporarily redirect emit to capture plib code
+            old_lines = self._lines
+            old_indent = self._indent
+            self._lines = []
+            self._indent = 0
+
+            self._gen_plib_code(
+                plib_info["lib_name"], plib_info["alias"], plib_info["ast"]
+            )
+
+            plib_lines.extend(self._lines)
+            self._lines = old_lines
+            self._indent = old_indent
+
+        # Prepend plib code before main program
+        if plib_lines:
+            self._lines = plib_lines + self._lines
 
     def _get_plibs_search_dirs(self):
         """Return list of directories to search for plib files."""
@@ -975,57 +1406,124 @@ class CodeGen:
             "/usr/lib/PLIBS",
         ]
 
-    def _collect_plib_includes(self, lib_name: str, alias: str = None):
-        """Collect includes from a plib file into self._collected_includes."""
+    def _scan_plib_folder(self, folder_name: str):
+        """Scan a folder for plib files and collect their top-level functions."""
         import os
         import lexer
         import parser as p
 
         search_dirs = []
         if self.source_path:
-            search_dirs.append(os.path.dirname(self.source_path))
+            src_dir = os.path.dirname(self.source_path)
+            search_dirs.append(src_dir)
+            parent = os.path.dirname(src_dir)
+            while parent and parent != src_dir:
+                search_dirs.append(parent)
+                src_dir = parent
+                parent = os.path.dirname(parent)
+        search_dirs.extend(self._get_plibs_search_dirs())
 
-        if "/" in lib_name:
-            folder, filename = lib_name.split("/", 1)
-            search_dirs.extend(
-                [
-                    os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
-                    f"/usr/lib/PLIBS/{folder}",
-                ]
-            )
-        else:
-            search_dirs.extend(
-                [
-                    ".",
-                    os.path.expanduser("~/.local/lib/PLIBS"),
-                    "/usr/lib/PLIBS",
-                ]
-            )
+        # Search for the folder in search dirs
+        folder_path = None
+        for base in search_dirs:
+            candidate = os.path.join(base, folder_name)
+            if os.path.isdir(candidate):
+                folder_path = candidate
+                break
+
+        if not folder_path:
+            return
+
+        # Scan for all .plib files in the folder
+        for filename in sorted(os.listdir(folder_path)):
+            if filename.endswith(".plib"):
+                plib_name = filename[:-5]  # Remove .plib extension
+                plib_path = os.path.join(folder_path, filename)
+                # Use underscores for consistent prefixing (e.g., plstd_streamer)
+                full_lib_name = f"{folder_name}_{plib_name}"
+
+                try:
+                    with open(plib_path, "r") as f:
+                        plib_content = f.read()
+
+                    tokens = lexer.Lexer(plib_content).lex()
+                    tokens.append(("EOF", "EOF", 0, 0))
+                    plib_ast = p.Parser(tokens).parse_program()
+
+                    # Collect top-level functions
+                    if full_lib_name not in self._top_level_lib_functions:
+                        self._top_level_lib_functions[full_lib_name] = set()
+                    for decl in plib_ast.declarations:
+                        if isinstance(decl, p.Function):
+                            self._top_level_lib_functions[full_lib_name].add(decl.name)
+                except Exception:
+                    pass  # Skip files that can't be parsed
+
+    def _collect_plib_includes(self, lib_name: str, alias: str = None):
+        """Collect includes from a plib file into self._collected_includes."""
+        import os
+        import lexer
+        import parser as p
 
         plib_path = None
-        search_name = lib_name.split("/")[-1]
 
-        # For paths like "folder/name" (e.g., "plstd/plstd"), look in folder subdirectory
-        if "/" in lib_name:
-            folder = lib_name.split("/")[0]
-            for base in ["."] + self._get_plibs_search_dirs():
-                folder_path = os.path.join(base, folder)
-                if os.path.isdir(folder_path):
-                    # Find any .plib file in the folder
-                    for f in os.listdir(folder_path):
-                        if f.endswith(".plib"):
-                            plib_path = os.path.join(folder_path, f)
+        # Handle absolute paths directly
+        if os.path.isabs(lib_name):
+            if os.path.exists(lib_name):
+                plib_path = lib_name
+            elif os.path.exists(f"{lib_name}.plib"):
+                plib_path = f"{lib_name}.plib"
+        else:
+            search_dirs = []
+            if self.source_path:
+                src_dir = os.path.dirname(self.source_path)
+                search_dirs.append(src_dir)
+                parent = os.path.dirname(src_dir)
+                while parent and parent != src_dir:
+                    search_dirs.append(parent)
+                    src_dir = parent
+                    parent = os.path.dirname(parent)
+
+            if "/" in lib_name:
+                folder, filename = lib_name.split("/", 1)
+                search_dirs.extend(
+                    [
+                        os.path.expanduser(f"~/.local/lib/PLIBS/{folder}"),
+                        f"/usr/lib/PLIBS/{folder}",
+                    ]
+                )
+            else:
+                search_dirs.extend(
+                    [
+                        ".",
+                        os.path.expanduser("~/.local/lib/PLIBS"),
+                        "/usr/lib/PLIBS",
+                    ]
+                )
+
+            search_name = lib_name.split("/")[-1]
+
+            # For paths like "folder/name", look in folder subdirectory
+            if "/" in lib_name:
+                folder = lib_name.split("/")[0]
+                for base in ["."] + self._get_plibs_search_dirs():
+                    folder_path = os.path.join(base, folder)
+                    if os.path.isdir(folder_path):
+                        # Find any .plib file in the folder
+                        for f in os.listdir(folder_path):
+                            if f.endswith(".plib"):
+                                plib_path = os.path.join(folder_path, f)
+                                break
+                        if plib_path:
                             break
-                    if plib_path:
-                        break
 
-        if not plib_path:
-            # Standard search
-            for d in self._get_plibs_search_dirs():
-                candidate = os.path.join(d, f"{search_name}.plib")
-                if os.path.exists(candidate):
-                    plib_path = candidate
-                    break
+            if not plib_path:
+                # Standard search
+                for d in self._get_plibs_search_dirs():
+                    candidate = os.path.join(d, f"{search_name}.plib")
+                    if os.path.exists(candidate):
+                        plib_path = candidate
+                        break
 
         if not plib_path:
             return
@@ -1104,8 +1602,17 @@ class CodeGen:
         elif isinstance(node, LibAccess):
             pass  # Handled in expression context
         elif isinstance(node, SpaceDecl):
+            old_space = self._current_space
+            old_local_funcs = self._space_local_functions.copy()
+            self._current_space = node.name
+            self._space_local_functions = set()
+            for decl in node.declarations:
+                if isinstance(decl, Function):
+                    self._space_local_functions.add(decl.name)
             for decl in node.declarations:
                 self._gen_statement(decl)
+            self._current_space = old_space
+            self._space_local_functions = old_local_funcs
         elif node is None:
             pass  # Skip None declarations (e.g., skipped extern "C" blocks)
         else:
@@ -1123,6 +1630,9 @@ class CodeGen:
             ptype = p[0]
             pname = p[1]
             psize = p[2] if len(p) > 2 else None
+            # Track parameter types for len() and other operations
+            if ptype != "...":
+                self._dynam_declarations[pname] = ptype
             if ptype == "...":
                 params.append("...")
             else:
@@ -1142,8 +1652,42 @@ class CodeGen:
                             param_str += f"[{psize}]"
                 params.append(param_str)
         param_str = ", ".join(params) if params else "void"
-        self._emit(f"{ret_type} {node.name}({param_str}) {{")
+        func_name = node.name
+        # Add lib prefix only to top-level plib functions (not space-local ones)
+        if (
+            self._current_lib_name
+            and not self._is_plib_source
+            and not self._current_space
+        ):
+            func_name = f"{self._current_lib_name}_{func_name}"
+        self._emit(f"{ret_type} {func_name}({param_str}) {{")
         self._indent += 1
+
+        # Insert global dynam initializations at the start of main()
+        if (
+            node.name == "main"
+            and self._global_dynam_inits
+            and not self._dynam_inits_inserted
+        ):
+            for init_line in self._global_dynam_inits:
+                self._emit(init_line)
+            self._emit("")
+            self._dynam_inits_inserted = True
+
+        # Auto-call plib init functions for global dynam arrays
+        if (
+            node.name == "main"
+            and self._plib_init_funcs
+            and not self._plib_inits_called
+        ):
+            for init_func in self._plib_init_funcs:
+                self._emit(f"{init_func}();")
+            self._emit("")
+            self._plib_inits_called = True
+
+        old_in_global = self._in_global_scope
+        self._in_global_scope = False
+
         if isinstance(node.body, Compound):
             for stmt in node.body.stmts:
                 self._gen_node(stmt)
@@ -1152,6 +1696,8 @@ class CodeGen:
         self._indent -= 1
         self._emit("}")
         self._emit("")  # blank line after function
+
+        self._in_global_scope = old_in_global
 
     def _gen_declaration(self, node: Declaration):
         original_type = node.var_type  # Keep original for special types
@@ -1168,37 +1714,70 @@ class CodeGen:
             self._dynam_declarations[name] = original_type
 
             # Generate struct name for this dynam type
-            struct_name = f"dynam_{elem_type}"
+            struct_name = self._get_dynam_struct_name(elem_type)
 
             # Generate struct definition and helper functions (stored in _helper_lines)
             if struct_name not in self._generated_dynam_structs:
                 self._generated_dynam_structs.add(struct_name)
-                # Generate helper functions for this dynam type (adds to _helper_lines)
-                self._gen_dynam_helper_functions(struct_name, mapped_elem, elem_type)
+            self._gen_dynam_helper_functions(struct_name, mapped_elem, elem_type)
 
             # Generate initialization code
+            # At global scope in .ctri: emit declaration at file scope, track initialization for main()
+            # At global scope in .plib: emit declaration at file scope, track for init function
+            # At local scope: emit directly
+            is_plib = self._generating_plib or self._is_plib_source
             if node.initializer and hasattr(node.initializer, "elements"):
                 # Array initializer: [1, 2, 3]
                 init_vals = [self._expr(e) for e in node.initializer.elements]
                 init_count = len(init_vals)
-
-                # Initial capacity: at least 4 or enough for initial elements
                 init_capacity = max(4, init_count)
 
-                # Generate the dynam struct initialization with allocated data
-                self._emit(
-                    f"{struct_name} {name} = {{malloc({init_capacity} * sizeof({mapped_elem})), 0, {init_capacity}}};"
-                )
+                if self._in_global_scope:
+                    self._emit(f"{struct_name} {name};")
+                    init_line = f"{name}.data = malloc({init_capacity} * sizeof({mapped_elem})); {name}.size = 0; {name}.capacity = {init_capacity};"
+                    push_lines = [
+                        f"{struct_name}_push(&{name}, {v});" for v in init_vals
+                    ]
+                    if is_plib:
+                        self._plib_global_inits.append((init_line, push_lines))
+                    else:
+                        self._global_dynam_inits.append(init_line)
+                        self._global_dynam_inits.extend(push_lines)
+                else:
+                    self._emit(
+                        f"{struct_name} {name} = {{malloc({init_capacity} * sizeof({mapped_elem})), 0, {init_capacity}}};"
+                    )
+                    for v in init_vals:
+                        self._emit(f"{struct_name}_push(&{name}, {v});")
+            elif node.initializer and isinstance(node.initializer, Call):
+                init_expr = self._expr(node.initializer)
 
-                # Copy initial elements using helper function
-                for i, init_val in enumerate(init_vals):
-                    self._emit(f"{struct_name}_push(&{name}, {init_val});")
+                if self._in_global_scope:
+                    self._emit(f"{struct_name} {name};")
+                    init_line = f"{name}.data = malloc(4 * sizeof({mapped_elem})); {name}.size = 0; {name}.capacity = 4;"
+                    push_line = f"{struct_name}_push(&{name}, {init_expr});"
+                    if is_plib:
+                        self._plib_global_inits.append((init_line, [push_line]))
+                    else:
+                        self._global_dynam_inits.append(init_line)
+                        self._global_dynam_inits.append(push_line)
+                else:
+                    self._emit(
+                        f"{struct_name} {name} = {{malloc(4 * sizeof({mapped_elem})), 0, 4}};"
+                    )
+                    self._emit(f"{struct_name}_push(&{name}, {init_expr});")
             else:
-                # Empty dynam array with default capacity 4
-                default_cap = 4
-                self._emit(
-                    f"{struct_name} {name} = {{malloc({default_cap} * sizeof({mapped_elem})), 0, {default_cap}}};"
-                )
+                if self._in_global_scope:
+                    self._emit(f"{struct_name} {name};")
+                    init_line = f"{name}.data = malloc(4 * sizeof({mapped_elem})); {name}.size = 0; {name}.capacity = 4;"
+                    if is_plib:
+                        self._plib_global_inits.append((init_line, []))
+                    else:
+                        self._global_dynam_inits.append(init_line)
+                else:
+                    self._emit(
+                        f"{struct_name} {name} = {{malloc(4 * sizeof({mapped_elem})), 0, 4}};"
+                    )
             return
 
         # Handle string type: dynamic character array (like dynam char)
@@ -1247,6 +1826,17 @@ class CodeGen:
                     self._emit(f"char* {var_name} = _tmp;")
                     return
 
+            if node.initializer and isinstance(node.initializer, Cast):
+                # Cast to string: string s = (string)ptr;
+                if node.initializer.cast_type == "string":
+                    init_expr = self._expr(node.initializer)
+                    self._emit(f"char* {name} = {init_expr};")
+                    return
+            if node.initializer and isinstance(node.initializer, Call):
+                # Function call returning string: string s = func(...);
+                init_expr = self._expr(node.initializer)
+                self._emit(f"char* {name} = {init_expr};")
+                return
             if node.initializer and hasattr(node.initializer, "value"):
                 # String literal: "hello"
                 init_val = node.initializer.value
@@ -1338,13 +1928,21 @@ class CodeGen:
                         dim_list[i] = inferred
                     else:
                         raise ValueError(
-                            f"Cannot infer dimension {i + 1} for array '{node.name}' - "
-                            f"provide explicit size or ensure initializer has values at this level"
+                            error_msgs.get_error_msg(
+                                "E751",
+                                dim=i + 1,
+                                name=node.name,
+                                fallback=f"Cannot infer dimension {i + 1} for array '{node.name}' - provide explicit size or ensure initializer has values at this level",
+                            )
                         )
                 else:
                     raise ValueError(
-                        f"Cannot infer dimension {i + 1} for array '{node.name}' - "
-                        f"provide explicit size or initializer"
+                        error_msgs.get_error_msg(
+                            "E751",
+                            dim=i + 1,
+                            name=node.name,
+                            fallback=f"Cannot infer dimension {i + 1} for array '{node.name}' - provide explicit size or initializer",
+                        )
                     )
 
         # Build final name with all dimensions
@@ -1373,10 +1971,22 @@ class CodeGen:
         else:
             self._emit(f"{typ} {name};")
 
+    def _get_dynam_struct_name(self, elem_type: str) -> str:
+        """Generate a valid C struct name from an element type.
+
+        Replaces invalid characters in struct names (like '*') with valid alternatives.
+        """
+        sanitized = elem_type.replace("*", "_ptr").replace(" ", "_")
+        return f"dynam_{sanitized}"
+
     def _gen_dynam_helper_functions(
         self, struct_name: str, elem_type: str, original_elem_type: str
     ):
         """Generate push, pop, and len helper functions for a dynam type."""
+        # Skip if already generated
+        if f"{struct_name}_push" in self._generated_dynam_funcs:
+            return
+
         # Generate struct definition
         self._helper_lines.append(f"typedef struct {{")
         self._helper_lines.append(f"    {elem_type}* data;")
@@ -1579,7 +2189,13 @@ class CodeGen:
 
     def _gen_return(self, node: Return):
         if node.expr is not None:
-            self._emit(f"return {self._expr(node.expr)};")
+            expr_str = self._expr(node.expr)
+            if isinstance(node.expr, Var):
+                var_name = node.expr.name
+                dynam_type = self._get_dynam_type(var_name)
+                if dynam_type and dynam_type.startswith("dynam "):
+                    expr_str = f"{var_name}.data"
+            self._emit(f"return {expr_str};")
         else:
             self._emit("return;")
 
@@ -1600,10 +2216,9 @@ class CodeGen:
                         # This is a reassignment to a dynam array
                         if isinstance(value, InitList):
                             init_vals = [self._expr(e) for e in value.elements]
-                            struct_name = (
-                                f"dynam_{dynam_type[6:]}"  # "dynam int" -> "dynam_int"
-                            )
-                            mapped_elem = self._map_type(dynam_type[6:])
+                            elem_type = dynam_type[6:]
+                            struct_name = self._get_dynam_struct_name(elem_type)
+                            mapped_elem = self._map_type(elem_type)
 
                             # Free old data, reallocate and copy
                             self._emit(f"free({var_name}.data);")
@@ -1629,6 +2244,14 @@ class CodeGen:
                             # String literal reassignment: free(s); s = strdup("new");
                             self._emit(f"free({var_name});")
                             self._emit(f"{var_name} = strdup({value.value});")
+                            return
+                        elif isinstance(value, Binary) and value.op == "+":
+                            # String concatenation: s = s + " World"
+                            right = self._expr(value.right)
+                            self._emit(
+                                f"{var_name} = realloc({var_name}, strlen({var_name}) + strlen({right}) + 1);"
+                            )
+                            self._emit(f"strcat({var_name}, {right});")
                             return
 
             self._emit(f"{self._expr(node.expr)};")
