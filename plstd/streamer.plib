@@ -96,11 +96,10 @@ int sizeget(string path) {
 string steal(string path, string out_path) {
     string stream = instream(path);
     if (!stream) { return NULL; }
-
     if (!outstream(stream, out_path)) { return NULL; }
     return stream;
 }
 
-void delete_file(string path) {
+void remove(string path) {
     remove_file@streams(path);
 }
