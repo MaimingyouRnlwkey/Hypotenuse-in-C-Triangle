@@ -21,7 +21,7 @@ typed struct Example(int value) {
 
 typed struct Inheritor&Example {
     // inheritor: demonstrates an inheriting struct (syntax is language-specific)
-    init() {
+    init {
         self.name = "Default";
     }
     end {}
