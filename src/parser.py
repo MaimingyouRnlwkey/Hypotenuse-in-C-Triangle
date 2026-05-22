@@ -2524,6 +2524,9 @@ class Parser:
         stmts = []
         while True:
             t = self.peek()
+            if t[0] in ("PREPROCESSOR", "COMMENT_MULTI", "COMMENT_LINE"):
+                self.advance()
+                continue
             if t[0] == "RBRACE":
                 break
             if t[0] == "EOF":
