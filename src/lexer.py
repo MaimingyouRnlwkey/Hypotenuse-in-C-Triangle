@@ -48,6 +48,8 @@ Tokens = [
     ("SIZEOF", re.compile(r"\bsizeof\b")),
     ("RESTRICT", re.compile(r"\brestrict\b")),
     ("BOOLEAN", re.compile(r"\b_Bool\b")),
+    ("BOOLEAN", re.compile(r"\bbool\b")),
+        ("NULLPTR", re.compile(r"\bnullptr\b")),    # C11 bool (from stdbool.h)
     ("UNDERSCORE_GENERIC", re.compile(r"\b_Generic\b")),
     ("UNDERSCORE_ALIGNOF", re.compile(r"\b_Alignof\b")),
     ("UNDERSCORE_ALIGNAS", re.compile(r"\b_Alignas\b")),

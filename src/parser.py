@@ -433,6 +433,7 @@ _TYPE_TOKENS = (
     "SIZE_T",
     "NORETURN",
     "STRING",
+    "BOOLEAN",
     "DYNAM",
 )
 _BASE_TYPE_TOKENS = (
@@ -448,6 +449,7 @@ _BASE_TYPE_TOKENS = (
     "SIZE_T",
     "DYNAM",
     "STRING",
+    "BOOLEAN",
 )
 
 
@@ -578,8 +580,7 @@ class Parser:
                 elem_typ2 = self.advance()[1]
                 elem_typ = f"{elem_typ} {elem_typ2}"
             typ = f"dynam {elem_typ}"
-        elif typ in self._typedefs:
-            typ = self._typedefs[typ]
+        # Don't expand typedef aliases - keep original name for correct C output
         # Handle compound types: long long, unsigned long, etc.
         # Use while loop to handle multiple type qualifiers (long long)
         elif typ not in (
@@ -864,8 +865,7 @@ class Parser:
             while self.peek()[0] in ("CONST", "VOLATILE"):
                 qualifiers.append(self.advance()[1])
             typ = self.advance()[1]
-            if typ in self._typedefs:
-                typ = self._typedefs[typ]
+            # Don't expand typedef aliases - keep original name for correct C output
             # Prepend qualifiers to type
             if qualifiers:
                 typ = " ".join(qualifiers) + " " + typ
@@ -943,9 +943,8 @@ class Parser:
                                 qualifiers.append(self.advance()[1])
 
                             ptype = self.advance()[1]
-                            if ptype in self._typedefs:
-                                ptype = self._typedefs[ptype]
-                            elif self.peek()[0] in _BASE_TYPE_TOKENS:
+                            # Don't expand typedef aliases - keep original name
+                            if self.peek()[0] in _BASE_TYPE_TOKENS:
                                 ptype = f"{ptype} {self.advance()[1]}"
 
                             ptype = self._consume_pointer_stars(ptype)
@@ -1289,6 +1288,7 @@ class Parser:
             # anywhere; they are emitted into the generated data section.
             if self.peek()[0] in (
                 "STRING",
+    "BOOLEAN",
                 "INT",
                 "CHAR",
                 "FLOAT",
@@ -1690,7 +1690,7 @@ class Parser:
                 if self.peek()[0] == "IDENTIFIER":
                     actual_type += " " + self.advance()[1]
                 if self.peek()[0] == "LBRACE":
-                    actual_type += self.advance()[1]
+                    actual_type += " " + self.advance()[1]
                     depth = 1
                     while depth > 0:
                         inner_tok = self.peek()
@@ -1698,9 +1698,10 @@ class Parser:
                             depth += 1
                         elif inner_tok[0] == "RBRACE":
                             depth -= 1
-                        self.advance()
-                    if self.peek()[0] == "IDENTIFIER":
                         actual_type += " " + self.advance()[1]
+                    # BUG FIX: Don't consume the typedef alias here
+                    # if self.peek()[0] == "IDENTIFIER":
+                    #     actual_type += " " + self.advance()[1]
             elif tok[0] == "MULTIPLY":
                 actual_type += self.advance()[1]
             elif tok[0] == "LPAREN":
@@ -1788,20 +1789,54 @@ class Parser:
                 # Only if no base types were found
                 if not field_type.strip() and self.peek()[0] == "IDENTIFIER":
                     field_type = self.advance()[1]
+                # Handle STRUCT as a field type (nested anonymous struct)
+                if not field_type.strip() and self.peek()[0] == "STRUCT":
+                    self.advance()  # consume STRUCT
+                    if self.peek()[0] == "IDENTIFIER":
+                        # struct TypeName field; - named struct type
+                        struct_name = self.advance()[1]
+                        field_type = f"struct {struct_name}"
+                    elif self.peek()[0] == "LBRACE":
+                        # struct { ... } field; - anonymous struct type
+                        self.advance()  # consume LBRACE
+                        brace_depth = 1
+                        while brace_depth > 0:
+                            if self.peek()[0] == "EOF":
+                                raise SyntaxError(
+                                    error_msgs.get_error_msg(
+                                        "E602",
+                                        file="struct",
+                                        fallback="Unexpected end of file: unclosed struct",
+                                    )
+                                )
+                            tok = self.advance()
+                            if tok[0] == "LBRACE":
+                                brace_depth += 1
+                            elif tok[0] == "RBRACE":
+                                brace_depth -= 1
+                        field_type = "struct { anonymous }"
+                    else:
+                        field_type = "struct"
                 field_type = field_type.strip()
                 field_type = self._consume_pointer_stars(field_type)
                 field_name = self.expect("IDENTIFIER")[1]
+                # Collect all field names separated by commas
+                field_names = [field_name]
+                while self.accept("COMMA"):
+                    field_name = self.expect("IDENTIFIER")[1]
+                    field_names.append(field_name)
                 # Support array fields: int arr[5], int arr[], char s[]
-                array_suffix = ""
-                while self.accept("LBRACKET"):
-                    dim = self.advance()[1] if self.peek()[0] != "RBRACKET" else ""
-                    array_suffix += f"[{dim}]"
-                    self.expect("RBRACKET")
-                full_name = (
-                    f"{field_name}{array_suffix}" if array_suffix else field_name
-                )
+                for fn in field_names:
+                    array_suffix = ""
+                    while self.accept("LBRACKET"):
+                        dim = self.advance()[1] if self.peek()[0] != "RBRACKET" else ""
+                        array_suffix += f"[{dim}]"
+                        self.expect("RBRACKET")
+                    full_name = (
+                        f"{fn}{array_suffix}" if array_suffix else fn
+                    )
+                    fields.append((field_type, full_name))
                 self.expect("SEMICOLON")
-                fields.append((field_type, full_name))
             self.expect("RBRACE")
             self.expect("SEMICOLON")
             return StructDef(name=name, fields=fields, is_anonymous=is_anonymous)
@@ -1826,9 +1861,8 @@ class Parser:
                             while self.peek()[0] in ("CONST", "VOLATILE"):
                                 type_qualifiers.append(self.advance()[1])
                             ptype = self.advance()[1]
-                            if ptype in self._typedefs:
-                                ptype = self._typedefs[ptype]
-                            elif (
+                            # Don't expand typedef aliases - keep original name
+                            if (
                                 ptype in ("struct", "union", "enum")
                                 and self.peek()[0] == "IDENTIFIER"
                             ):
@@ -2350,12 +2384,11 @@ class Parser:
                     base_type = self.advance()[1]
                 else:
                     base_type = "int"
-                if base_type in self._typedefs:
-                    base_type = self._typedefs[base_type]
+                # Don't expand typedef aliases - keep original name
 
             elif t[0] == "IDENTIFIER" and t[1] not in ("va_list",):
                 if t[1] in self._typedefs:
-                    base_type = self._typedefs[t[1]]
+                    pass  # Keep original name
 
             elif base_type == "struct" and self.peek()[0] == "IDENTIFIER":
                 struct_tag = self.advance()[1]

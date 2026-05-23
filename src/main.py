@@ -148,7 +148,7 @@ def print_objects(objects):
 
 def preprocess_source(source, target_arch=None):
     """Preprocess source code handling #define, #ifdef, #ifndef, #if, #else, #elif, #endif.
-    
+
     Args:
         source: Source code string
         target_arch: Target architecture (x86_64, arm64) or None for auto-detect
@@ -158,6 +158,8 @@ def preprocess_source(source, target_arch=None):
     """
     import platform
     import re
+    # Replace C23 nullptr with 0 for C11 compatibility
+    source = re.sub(r"\bnullptr\b", "0", source)
     
     # Define architecture macros
     if target_arch is None:
