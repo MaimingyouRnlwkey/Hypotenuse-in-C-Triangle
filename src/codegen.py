@@ -133,6 +133,7 @@ class CodeGen:
         self._ctri_allocator_helpers_generated = True
         self._helper_lines.append("")
         self._helper_lines.append("#define __CTRI_HEAP_SIZE 4194304")
+        self._helper_lines.append("#define __CTRI_HEADER_SIZE (3 * sizeof(int))")
         self._helper_lines.append("void* __ctri_malloc(int size);")
         self._helper_lines.append("void __ctri_free(void* ptr);")
         self._helper_lines.append("void* __ctri_realloc(void* ptr, int new_size);")
@@ -157,19 +158,19 @@ class CodeGen:
         self._helper_lines.append("            *block_free = 0;")
         self._helper_lines.append("            *block_next = 0;")
         self._helper_lines.append(
-            "            return (void*)(__ctri_heap + pos + 2 * sizeof(int));"
+            "            return (void*)(__ctri_heap + pos + __CTRI_HEADER_SIZE);"
         )
         self._helper_lines.append("        }")
         self._helper_lines.append("        if (*block_free && *block_size >= size) {")
         self._helper_lines.append("            int remaining = *block_size - size;")
         self._helper_lines.append(
-            "            if (remaining > (int)(3 * sizeof(int))) {"
+            "            if (remaining > (int)(__CTRI_HEADER_SIZE)) {"
         )
         self._helper_lines.append(
-            "                int next_pos = pos + 2 * sizeof(int) + size;"
+            "                int next_pos = pos + __CTRI_HEADER_SIZE + size;"
         )
         self._helper_lines.append(
-            "                *(int*)(__ctri_heap + next_pos) = remaining - 2 * sizeof(int);"
+            "                *(int*)(__ctri_heap + next_pos) = remaining - __CTRI_HEADER_SIZE;"
         )
         self._helper_lines.append(
             "                *(int*)(__ctri_heap + next_pos + sizeof(int)) = 1;"
@@ -182,34 +183,33 @@ class CodeGen:
         self._helper_lines.append("            *block_free = 0;")
         self._helper_lines.append("            *block_size = size;")
         self._helper_lines.append(
-            "            return (void*)(__ctri_heap + pos + 2 * sizeof(int));"
+            "            return (void*)(__ctri_heap + pos + __CTRI_HEADER_SIZE);"
         )
         self._helper_lines.append("        }")
         self._helper_lines.append("        if (*block_next == 0) {")
         self._helper_lines.append(
-            "            int total = *block_size + 2 * sizeof(int) + size;"
-        )
-        self._helper_lines.append("            *(int*)(__ctri_heap + pos) = total;")
-        self._helper_lines.append(
-            "            *(int*)(__ctri_heap + pos + sizeof(int)) = 0;"
+            "            int new_pos = pos + __CTRI_HEADER_SIZE + *block_size;"
         )
         self._helper_lines.append(
-            "            *(int*)(__ctri_heap + pos + 2 * sizeof(int) + size) = 0;"
+            "            if (new_pos + __CTRI_HEADER_SIZE + size > __CTRI_HEAP_SIZE)"
         )
         self._helper_lines.append(
-            "            *(int*)(__ctri_heap + pos + 2 * sizeof(int) + size + sizeof(int)) = 1;"
+            "                return (void*)0;"
         )
         self._helper_lines.append(
-            "            *(int*)(__ctri_heap + pos + 2 * sizeof(int) + size + 2 * sizeof(int)) = 0;"
+            "            *(int*)(__ctri_heap + new_pos) = size;"
         )
         self._helper_lines.append(
-            "            *(int*)(__ctri_heap + pos) = *block_size + 2 * sizeof(int) + size;"
+            "            *(int*)(__ctri_heap + new_pos + sizeof(int)) = 0;"
         )
         self._helper_lines.append(
-            "            *block_next = pos + 2 * sizeof(int) + size;"
+            "            *(int*)(__ctri_heap + new_pos + 2 * sizeof(int)) = 0;"
         )
         self._helper_lines.append(
-            "            return (void*)(__ctri_heap + pos + 2 * sizeof(int));"
+            "            *block_next = new_pos;"
+        )
+        self._helper_lines.append(
+            "            return (void*)(__ctri_heap + new_pos + __CTRI_HEADER_SIZE);"
         )
         self._helper_lines.append("        }")
         self._helper_lines.append("        pos = *block_next;")
@@ -220,7 +220,7 @@ class CodeGen:
         self._helper_lines.append("void __ctri_free(void* ptr) {")
         self._helper_lines.append("    if (!ptr) return;")
         self._helper_lines.append(
-            "    int pos = (int)((char*)ptr - __ctri_heap) - 2 * sizeof(int);"
+            "    int pos = (int)((char*)ptr - __ctri_heap) - __CTRI_HEADER_SIZE;"
         )
         self._helper_lines.append("    if (pos < 0 || pos >= __CTRI_HEAP_SIZE) return;")
         self._helper_lines.append("    *(int*)(__ctri_heap + pos + sizeof(int)) = 1;")
@@ -233,9 +233,10 @@ class CodeGen:
         )
         self._helper_lines.append("        if (!next_free) break;")
         self._helper_lines.append(
-            "        int total = *(int*)(__ctri_heap + pos) + 2 * sizeof(int) + *(int*)(__ctri_heap + *next);"
+            "        int total = *(int*)(__ctri_heap + pos) + __CTRI_HEADER_SIZE + *(int*)(__ctri_heap + *next);"
         )
-        self._helper_lines.append("        *(int*)(__ctri_heap + pos) = total;")
+        self._helper_lines.append("        *(int*)(__ctri_heap + pos) = total;"
+        )
         self._helper_lines.append(
             "        *next = *(int*)(__ctri_heap + *next + 2 * sizeof(int));"
         )
@@ -245,7 +246,7 @@ class CodeGen:
         self._helper_lines.append("void* __ctri_realloc(void* ptr, int new_size) {")
         self._helper_lines.append("    if (!ptr) return __ctri_malloc(new_size);")
         self._helper_lines.append(
-            "    int pos = (int)((char*)ptr - __ctri_heap) - 2 * sizeof(int);"
+            "    int pos = (int)((char*)ptr - __ctri_heap) - __CTRI_HEADER_SIZE;"
         )
         self._helper_lines.append(
             "    if (pos < 0 || pos >= __CTRI_HEAP_SIZE) return (void*)0;"
@@ -265,21 +266,23 @@ class CodeGen:
             "            int next_size = *(int*)(__ctri_heap + *next);"
         )
         self._helper_lines.append(
-            "            int combined = old_size + 2 * sizeof(int) + next_size;"
+            "            int combined = old_size + __CTRI_HEADER_SIZE + next_size;"
         )
-        self._helper_lines.append("            if (combined >= new_size) {")
+        self._helper_lines.append("            if (combined >= new_size) {"
+        )
         self._helper_lines.append(
-            "                int remaining = combined - new_size - 2 * sizeof(int);"
+            "                int remaining = combined - new_size;"
         )
         self._helper_lines.append(
             "                *(int*)(__ctri_heap + pos) = new_size;"
         )
-        self._helper_lines.append("                if (remaining > 0) {")
-        self._helper_lines.append(
-            "                    int next_pos = pos + 2 * sizeof(int) + new_size;"
+        self._helper_lines.append("                if (remaining > (int)(__CTRI_HEADER_SIZE)) {"
         )
         self._helper_lines.append(
-            "                    *(int*)(__ctri_heap + next_pos) = remaining;"
+            "                    int next_pos = pos + __CTRI_HEADER_SIZE + new_size;"
+        )
+        self._helper_lines.append(
+            "                    *(int*)(__ctri_heap + next_pos) = remaining - __CTRI_HEADER_SIZE;"
         )
         self._helper_lines.append(
             "                    *(int*)(__ctri_heap + next_pos + sizeof(int)) = 1;"
@@ -288,12 +291,17 @@ class CodeGen:
             "                    *(int*)(__ctri_heap + next_pos + 2 * sizeof(int)) = 0;"
         )
         self._helper_lines.append("                    *next = next_pos;")
+        self._helper_lines.append("                } else {")
+        self._helper_lines.append(
+            "                    *next = *(int*)(__ctri_heap + *next + 2 * sizeof(int));"
+        )
         self._helper_lines.append("                }")
         self._helper_lines.append("                return ptr;")
         self._helper_lines.append("            }")
         self._helper_lines.append("        }")
         self._helper_lines.append("    }")
         self._helper_lines.append("    void* new_ptr = __ctri_malloc(new_size);")
+        self._helper_lines.append("    if (new_ptr == ptr) return ptr;")
         self._helper_lines.append("    if (new_ptr) {")
         self._helper_lines.append("        char* src = (char*)ptr;")
         self._helper_lines.append("        char* dst = (char*)new_ptr;")
@@ -303,7 +311,8 @@ class CodeGen:
         )
         self._helper_lines.append("    }")
         self._helper_lines.append("    __ctri_free(ptr);")
-        self._helper_lines.append("    return new_ptr;")
+        self._helper_lines.append("    return new_ptr;"
+        )
         self._helper_lines.append("}")
         self._helper_lines.append("")
 
