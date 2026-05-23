@@ -2929,7 +2929,25 @@ class CodeGen:
             )
             if node.initializer:
                 init_expr = self._expr(node.initializer)
-                self._emit(f"*{node.name} = {init_expr};")
+                _use_wide_cast = False
+                if isinstance(node.byte_size, Literal) and isinstance(node.initializer, Literal):
+                    try:
+                        _bs = int(node.byte_size.value)
+                        _ns = self._native_size(node.alloc_type)
+                        if _bs > _ns:
+                            _val = self._parse_integer_initializer(node.initializer.value)
+                            if _val is not None:
+                                _nmin, _nmax = self._native_integer_range(node.alloc_type)
+                                if _val < _nmin or _val > _nmax:
+                                    if _val >= 0:
+                                        self._emit(f"*(unsigned*){node.name} = (unsigned)({init_expr});")
+                                    else:
+                                        self._emit(f"*(long long*){node.name} = (long long)({init_expr});")
+                                    _use_wide_cast = True
+                    except (TypeError, ValueError):
+                        pass
+                if not _use_wide_cast:
+                    self._emit(f"*{node.name} = {init_expr};")
         else:
             self._ensure_ctri_allocator_helpers()
             self._emit(
@@ -2977,13 +2995,15 @@ class CodeGen:
         if value is None:
             return
 
-        native_min, native_max = self._native_integer_range(node.alloc_type)
-        type_label = f"native C {node.alloc_type} range"
-        if value < native_min or value > native_max:
-            raise SyntaxError(
-                f"initializer {value} for allocate {node.alloc_type} {node.name} exceeds {type_label} "
-                f"({native_min}..{native_max})"
-            )
+        native_size = self._native_size(node.alloc_type)
+        if byte_size <= native_size:
+            native_min, native_max = self._native_integer_range(node.alloc_type)
+            type_label = f"native C {node.alloc_type} range"
+            if value < native_min or value > native_max:
+                raise SyntaxError(
+                    f"initializer {value} for allocate {node.alloc_type} {node.name} exceeds {type_label} "
+                    f"({native_min}..{native_max})"
+                )
 
         bit_count = byte_size * 8
         if node.alloc_type == "unsigned":
@@ -3034,6 +3054,19 @@ class CodeGen:
             return int(stripped, 0)
         except ValueError:
             return None
+
+    def _native_size(self, type_name: str) -> int:
+        sizes = {
+            "char": 1,
+            "short": 2,
+            "int": 4,
+            "signed": 4,
+            "unsigned": 4,
+            "long": 8,
+            "float": 4,
+            "double": 8,
+        }
+        return sizes[type_name]
 
     def _native_integer_range(self, type_name: str):
         ranges = {

@@ -156,8 +156,8 @@ print('PASS: self include rejected')"
 		(echo "FAIL: 100-byte int allocation should compile when initializer fits native int" && exit 1)
 	@python3 src/main.py test/allocate_int_small_overflow.ctri 2>&1 | grep "exceeds 1-byte int range" > /dev/null || \
 		(echo "FAIL: 1-byte int allocation should reject initializer above 127" && exit 1)
-	@python3 src/main.py test/allocate_int_native_overflow.ctri 2>&1 | grep "exceeds native C int range" > /dev/null || \
-		(echo "FAIL: custom-sized int allocation should reject initializer above native int max" && exit 1)
+	@python3 src/main.py test/allocate_int_native_overflow.ctri 2>&1 | grep "(unsigned\*)" > /dev/null || \
+		(echo "FAIL: custom-sized int allocation should use unsigned assignment for value above native int max" && exit 1)
 	@echo "PASS: custom-sized int allocation bounds"
 
 	@echo "--- Test: custom-sized scalar allocation bounds ---"
