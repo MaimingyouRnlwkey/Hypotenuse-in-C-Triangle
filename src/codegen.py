@@ -133,6 +133,9 @@ class CodeGen:
         self._ctri_allocator_helpers_generated = True
         self._helper_lines.append("")
         self._helper_lines.append("#define __CTRI_HEAP_SIZE 4194304")
+        self._helper_lines.append("void* __ctri_malloc(int size);")
+        self._helper_lines.append("void __ctri_free(void* ptr);")
+        self._helper_lines.append("void* __ctri_realloc(void* ptr, int new_size);")
         self._helper_lines.append("static char __ctri_heap[__CTRI_HEAP_SIZE];")
         self._helper_lines.append("")
         self._helper_lines.append("void* __ctri_malloc(int size) {")
@@ -872,7 +875,10 @@ class CodeGen:
                         # the prefixed name {lib_name}_{base_callee}.
                         # This handles exposed libraries where bare names should
                         # resolve to the generated C function name.
-                        callee = f"{lib_name}_{base_callee}"
+                        resolved = self._resolve_imported_function_name(
+                            lib_name, base_callee
+                        )
+                        callee = resolved or f"{lib_name}_{base_callee}"
                 elif "&" in str(lib_name):
                     # Chain like a&b&c - transform
                     scope_chain = lib_name
@@ -1419,6 +1425,22 @@ class CodeGen:
             self._emitted_scoped_var_globals.add(generated_name)
         return generated_name
 
+    def _resolve_imported_function_name(self, lib_name: str, func_name: str):
+        """Find the generated C name for a function imported from a library."""
+        for lib_key, funcs in self._top_level_lib_functions.items():
+            lib_matches = (
+                lib_key == lib_name
+                or lib_key.startswith(f"{lib_name}_")
+                or lib_key.startswith(f"{lib_name}/")
+                or lib_key.replace("_", "/") == lib_name
+            )
+            for generated_name in funcs:
+                if not generated_name.endswith(f"_{func_name}"):
+                    continue
+                if lib_matches or generated_name == f"{func_name}_{func_name}":
+                    return generated_name
+        return None
+
     def _literal_to_c(self, value):
         if isinstance(value, str):
             stripped = value.lstrip("-")
@@ -1614,6 +1636,12 @@ class CodeGen:
                         nested_decl.name = generated_name
                     elif isinstance(nested_decl, p.Declaration):
                         nested_decl.name = f"{actual_prefix}_{nested_decl.name}"
+                    elif isinstance(nested_decl, p.AsmBlock):
+                        if nested_decl.is_function and nested_decl.name:
+                            original_name = nested_decl.name
+                            generated_name = f"{actual_prefix}_{nested_decl.name}"
+                            self._space_local_functions.add(original_name)
+                            nested_decl.name = generated_name
                     self._gen_node(nested_decl)
 
                 # Restore previous space context
@@ -2488,6 +2516,8 @@ class CodeGen:
         # Skip if already generated
         if f"{struct_name}_push" in self._generated_dynam_funcs:
             return
+
+        self._ensure_ctri_allocator_helpers()
 
         # Generate struct definition
         self._helper_lines.append("typedef struct {")

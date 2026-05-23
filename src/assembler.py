@@ -288,11 +288,20 @@ def _process_instructions(
     """Process instructions, replacing parameter names with registers."""
     updated = []
     for instr in instructions:
-        result = instr
+        if instr.strip().endswith(":"):
+            updated.append(instr)
+            continue
+        mnemonic_match = re.match(r"^(\s*[A-Za-z_.][A-Za-z0-9_.]*\b)(.*)$", instr)
+        if mnemonic_match:
+            prefix = mnemonic_match.group(1)
+            result = mnemonic_match.group(2)
+        else:
+            prefix = ""
+            result = instr
         for param_name, addr in param_map.items():
             pattern = r"\b" + re.escape(param_name) + r"\b"
             result = re.sub(pattern, addr, result)
-        updated.append(result)
+        updated.append(prefix + result)
     return updated
 
 
@@ -322,6 +331,7 @@ def assemble_asm_blocks(asm_blocks, source_path, target_arch=None, output_format
     is_macos = platform.system() == "Darwin"
     current_arch = platform.machine()
     len_label_counter = 0
+    emitted_asm_stems = set()
 
     def expand_write_call(instr, is_arm64_target):
         """Replace _write calls with pure syscalls."""
@@ -453,6 +463,9 @@ def assemble_asm_blocks(asm_blocks, source_path, target_arch=None, output_format
             )
 
         asm_stem = asm_block.name if asm_block.name else f"asm_block_{asm_index}"
+        if asm_stem in emitted_asm_stems:
+            continue
+        emitted_asm_stems.add(asm_stem)
         asm_path = os.path.join(base_dir, f"{asm_stem}.s")
         obj_path = os.path.join(base_dir, f"{asm_stem}.o")
 

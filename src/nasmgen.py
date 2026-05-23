@@ -234,11 +234,20 @@ def _process_instructions(
     """Process instructions, replacing parameter names with registers."""
     updated = []
     for instr in instructions:
-        result = instr
+        if instr.strip().endswith(":"):
+            updated.append(instr)
+            continue
+        mnemonic_match = re.match(r"^(\s*[A-Za-z_.][A-Za-z0-9_.]*\b)(.*)$", instr)
+        if mnemonic_match:
+            prefix = mnemonic_match.group(1)
+            result = mnemonic_match.group(2)
+        else:
+            prefix = ""
+            result = instr
         for param_name, addr in param_map.items():
             pattern = r"\b" + re.escape(param_name) + r"\b"
             result = re.sub(pattern, addr, result)
-        updated.append(result)
+        updated.append(prefix + result)
     return updated
 
 

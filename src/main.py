@@ -261,7 +261,15 @@ def preprocess_source(source, target_arch=None):
                 i += 1
                 continue
             
-            # Handle other directives - just pass through for now
+            # Handle other directives, such as #include and #pragma, by preserving
+            # them when the current conditional branch is active.
+            should_include = True
+            for include, _ in condition_stack:
+                if not include:
+                    should_include = False
+                    break
+            if should_include:
+                output_lines.append(line)
             i += 1
             continue
         
