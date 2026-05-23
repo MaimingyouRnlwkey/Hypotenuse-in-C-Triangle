@@ -100,6 +100,7 @@ class CodeGen:
         self._top_level_lib_functions = {}  # Maps lib_name -> set of top-level function names
         self._exposed_funcs = {}  # Maps bare_name -> lib_name for exposed functions
         self._folder_libs = {}  # Maps folder alias -> list of plib names (e.g., "lib" -> ["plstd/streamer", "plstd/other"])
+        self._namespace_imported_libs = set()  # Track libs imported as full namespaces
         self._used_functions = set()  # Track used function names for tree-shaking
         self._pending_plibs = []  # Store pending plib ASTs for tree-shaking
         self._asm_function_names = set()  # Track asm function names for macOS _ prefix
@@ -1221,6 +1222,8 @@ class CodeGen:
                     alias_map[imp.alias] = (lib_name, "local")
                 if imp.item:
                     specific_imports[imp.item] = lib_name
+                else:
+                    self._namespace_imported_libs.add(lib_name)
             elif "&" in source:
                 # Handle intra-file imports: using owner&symbol or using a&b&c&symbol.
                 parts = source.split("&")
@@ -1249,6 +1252,9 @@ class CodeGen:
                     alias_map[imp.alias] = (source, "local")
                 if imp.item:
                     specific_imports[imp.item] = source
+                else:
+                    basename = source.split("/")[-1].rsplit(".plib", 1)[0]
+                    self._namespace_imported_libs.add(basename)
 
         # Store for use in _expr
         # Map: bare_name -> (lib_name, namespace)
@@ -1379,6 +1385,21 @@ class CodeGen:
                     for imp in imports
                 ):
                     lib_imported = True
+            # Verify the library was imported (either as full namespace or specific item)
+            is_valid_target = (
+                exp_target in self._namespace_imported_libs
+                or exp_base in self._namespace_imported_libs
+                or exp_target in self._specific_imports
+            )
+            if not is_valid_target:
+                raise ValueError(
+                    error_msgs.get_error_msg(
+                        "E801",
+                        lib=exp_target,
+                        item="",
+                        fallback=f"Cannot expose '{exp_target}' - library not imported. Use 'using <{exp_target}>' or 'using {exp_target} from <...>' before exposing.",
+                    )
+                )
             # Track that this library is now exposed
             self._exposed_libs.add(exp_target)
             self._exposed_libs.add(exp_base)
@@ -1408,7 +1429,7 @@ class CodeGen:
                             self._exposed_funcs[bare_name] = actual_prefix
             # Also expose specifically imported items from this lib
             for item, (lb, _) in list(self._specific_imports.items()):
-                if lb == exp_base or lb == f"<{exp_base}>":
+                if lb == exp_base or lb == f"<{exp_base}>" or item == exp_base:
                     # Find which lib_key provides this item's implementation
                     for lib_key in list(self._top_level_lib_functions.keys()):
                         if lib_key in exposed_keys:
