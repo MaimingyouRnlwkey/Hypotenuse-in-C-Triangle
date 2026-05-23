@@ -1269,8 +1269,6 @@ class CodeGen:
             # "lib" is an alias for the standard library (plstd)
             if lib_name == "plstd" and "lib" not in self._alias_to_lib:
                 self._alias_to_lib["lib"] = "plstd"
-                # When using <plstd>, also scan folder for all plibs
-                self._scan_plib_folder("plstd")
             # Only collect includes from plib (don't generate code yet)
             self._collect_plib_includes(lib_name)
 
@@ -1376,6 +1374,7 @@ class CodeGen:
             self._exposed_libs.add(exp_target)
             self._exposed_libs.add(exp_base)
             # Add all functions from this library to _exposed_funcs
+            exposed_keys = set()
             for lib_key in list(self._top_level_lib_functions.keys()):
                 matches = (
                     lib_key == exp_base
@@ -1384,6 +1383,7 @@ class CodeGen:
                     or lib_key == exp_base.replace("/", "_")
                 )
                 if matches:
+                    exposed_keys.add(lib_key)
                     # Determine the actual prefix used for function names
                     if lib_key == exp_base:
                         actual_prefix = lib_key
@@ -1397,6 +1397,24 @@ class CodeGen:
                         if full_func_name.startswith(expected_prefix):
                             bare_name = full_func_name[len(expected_prefix) :]
                             self._exposed_funcs[bare_name] = actual_prefix
+            # Also expose specifically imported items from this lib
+            for item, (lb, _) in list(self._specific_imports.items()):
+                if lb == exp_base or lb == f"<{exp_base}>":
+                    # Find which lib_key provides this item's implementation
+                    for lib_key in list(self._top_level_lib_functions.keys()):
+                        if lib_key in exposed_keys:
+                            continue
+                        for full_func_name in self._top_level_lib_functions.get(lib_key, set()):
+                            expected_suffix = f"_{item}"
+                            if full_func_name.endswith(expected_suffix):
+                                bare_name = item
+                                actual_prefix = lib_key
+                                self._exposed_libs.add(actual_prefix)
+                                self._exposed_funcs[bare_name] = actual_prefix
+                                exposed_keys.add(lib_key)
+                                break
+                        if lib_key in exposed_keys:
+                            break
 
     def _resolve_scoped_var_import(self, owner, symbol):
         """Return the generated C name for an intra-file variable import."""
@@ -1771,11 +1789,19 @@ class CodeGen:
                     for base in search_paths:
                         folder_path = os.path.join(base, search_name)
                         if os.path.isdir(folder_path):
-                            # Collect ALL plibs in the folder
+                            # Determine which specific items are imported from this lib
+                            items_from_lib = set()
+                            for item, (lb, _) in list(self._specific_imports.items()):
+                                if lb == search_name or lb == lib_name:
+                                    items_from_lib.add(item)
+                            # Collect plibs from folder (filtered when specific imports exist)
                             for f in sorted(os.listdir(folder_path)):
                                 if f.endswith(".plib"):
-                                    full_plib_path = os.path.join(folder_path, f)
                                     plib_name = f[:-5]  # Remove .plib extension
+                                    # Only filter when specific items imported
+                                    if items_from_lib and plib_name not in items_from_lib:
+                                        continue
+                                    full_plib_path = os.path.join(folder_path, f)
                                     full_lib_name = f"{search_name}/{plib_name}"
                                     self._collect_single_plib(
                                         full_plib_path, full_lib_name, alias
