@@ -1,0 +1,7 @@
+// Test that calling unexposed function still raises error
+using printd from <plstd>;
+
+int main(void) {
+    printd("Hello, World!");
+    return 0;
+}
