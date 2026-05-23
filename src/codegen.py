@@ -829,13 +829,17 @@ class CodeGen:
                 lib_name, func_name = self._specific_imports[base_callee]
                 # Check if this library is exposed - if not, require @ prefix
                 is_exposed = lib_name in getattr(self, "_exposed_libs", set())
-                if not is_exposed and "@" not in callee:
+                # Also check if this specific function is exposed via expose func@lib
+                exposed_funcs = getattr(self, "_exposed_funcs", {})
+                is_func_exposed = base_callee in exposed_funcs
+                
+                if not is_exposed and not is_func_exposed and "@" not in callee:
                     raise ValueError(
                         error_msgs.get_error_msg(
                             "E802",
                             lib=lib_name,
                             func=base_callee,
-                            fallback=f"Function '{base_callee}' requires '{base_callee}@{lib_name}()' syntax (library not exposed). Use 'expose {lib_name}' before calling.",
+                            fallback=f"Function '{base_callee}' requires '{base_callee}@{lib_name}()' syntax (library not exposed). Use 'expose {lib_name}' or 'expose {base_callee}@{lib_name}' before calling.",
                         )
                     )
                 # If func_name is None, the function is a top-level plib function
@@ -1295,6 +1299,13 @@ class CodeGen:
         for exp in exposes:
             # Check if the library was imported first
             exp_target = exp.target
+
+            # Handle expose of a specifically imported function (using func from <lib>)
+            # e.g. "using printd from <plstd>;" + "expose printd;" should work
+            # as if the user wrote "expose printd@plstd;"
+            if exp_target in self._specific_imports:
+                lib_name = self._specific_imports[exp_target][0]
+                exp_target = f"{exp_target}@{lib_name}"
 
             # Handle @ syntax: expose func@lib exposes a specific item from a library
             if "@" in exp_target:
