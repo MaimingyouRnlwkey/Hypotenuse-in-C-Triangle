@@ -2,6 +2,7 @@
 
 import os
 import platform
+import sys
 
 import error_msgs
 from parser import (
@@ -62,11 +63,12 @@ TYPE_MAP = {
 
 
 class CodeGen:
-    def __init__(self, ast, structor, layouts=None, source_path=None):
+    def __init__(self, ast, structor, layouts=None, source_path=None, target_arch=None):
         self.ast = ast
         self.structor = structor
         self.layouts = layouts or {}
         self.source_path = source_path  # path to source file for plib lookup
+        self.target_arch = target_arch
         self._lines = []
         self._indent = 0
         self._specific_imports = {}  # item -> (lib_name, namespace)
@@ -116,6 +118,14 @@ class CodeGen:
             ".plib"
         )  # Direct plib compilation
         self._asm_blocks = []  # Store asm blocks for later .asm file generation
+
+    def _preprocess_plib_content(self, content: str) -> str:
+        """Apply the same preprocessor pass to imported plibs as source files."""
+        main_module = sys.modules.get("main") or sys.modules.get("__main__")
+        preprocess = getattr(main_module, "preprocess_source", None)
+        if preprocess is None:
+            return content
+        return preprocess(content, self.target_arch)
 
     def _ensure_ctri_allocator_helpers(self):
         if self._ctri_allocator_helpers_generated:
@@ -1514,6 +1524,7 @@ class CodeGen:
             with open(plib_path, "r") as f:
                 plib_content = f.read()
 
+            plib_content = self._preprocess_plib_content(plib_content)
             tokens = lexer.Lexer(plib_content).lex()
             tokens.append(("EOF", "EOF", 0, 0))
             plib_ast = p.Parser(tokens).parse_program()
@@ -1756,6 +1767,7 @@ class CodeGen:
         with open(plib_path, "r") as f:
             plib_content = f.read()
 
+        plib_content = self._preprocess_plib_content(plib_content)
         tokens = lexer.Lexer(plib_content).lex()
         tokens.append(("EOF", "EOF", 0, 0))
         plib_ast = p.Parser(tokens).parse_program()
@@ -1922,6 +1934,7 @@ class CodeGen:
                     with open(plib_path, "r") as f:
                         plib_content = f.read()
 
+                    plib_content = self._preprocess_plib_content(plib_content)
                     tokens = lexer.Lexer(plib_content).lex()
                     tokens.append(("EOF", "EOF", 0, 0))
                     plib_ast = p.Parser(tokens).parse_program()
@@ -2022,6 +2035,7 @@ class CodeGen:
         with open(plib_path, "r") as f:
             plib_content = f.read()
 
+        plib_content = self._preprocess_plib_content(plib_content)
         tokens = lexer.Lexer(plib_content).lex()
         tokens.append(("EOF", "EOF", 0, 0))
         plib_ast = p.Parser(tokens).parse_program()

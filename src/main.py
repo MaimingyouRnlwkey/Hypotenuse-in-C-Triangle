@@ -384,7 +384,7 @@ def compile_file(path, target_arch=None):
     objects = structor.build_from_ast()
 
     # 🔥 ACTUAL COMPILATION
-    codegen_obj = codegen.CodeGen(ast, structor, source_path=path)
+    codegen_obj = codegen.CodeGen(ast, structor, source_path=path, target_arch=target_arch)
     output = codegen_obj.generate()
     asm_blocks = codegen_obj._asm_blocks
 
