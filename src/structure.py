@@ -1011,7 +1011,7 @@ class Structor:
             for field in node.fields:
                 if isinstance(field, tuple) and len(field) == 2:
                     fields.append(field)
-                elif hasattr(field, "type_name") and hasattr(field, "name"):
+                elif not isinstance(field, tuple) and hasattr(field, "type_name") and hasattr(field, "name"):
                     fields.append((field.type_name, field.name))
         struct_name = getattr(node, "name", None)
         if struct_name:
@@ -1027,7 +1027,7 @@ class Structor:
             for field in node.fields:
                 if isinstance(field, tuple) and len(field) == 2:
                     fields.append(field)
-                elif hasattr(field, "type_name") and hasattr(field, "name"):
+                elif not isinstance(field, tuple) and hasattr(field, "type_name") and hasattr(field, "name"):
                     fields.append((field.type_name, field.name))
         union_name = getattr(node, "name", None)
         if union_name:
