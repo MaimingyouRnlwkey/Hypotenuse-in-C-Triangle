@@ -2,6 +2,9 @@ space streams_impl_arm64 {
     asm int sys_read(int fd, string buf, int count) {
         syntax arm64_macho
         .section __TEXT,__text
+        ldr x0, fd
+        ldr x1, buf
+        ldr x2, count
         mov x16, #3
         svc #0x80
         ret
@@ -10,6 +13,9 @@ space streams_impl_arm64 {
     asm int sys_write(int fd, string buf, int count) {
         syntax arm64_macho
         .section __TEXT,__text
+        ldr x0, fd
+        ldr x1, buf
+        ldr x2, count
         mov x16, #4
         svc #0x80
         ret
@@ -18,6 +24,9 @@ space streams_impl_arm64 {
     asm int sys_open(string path, int flags, int mode) {
         syntax arm64_macho
         .section __TEXT,__text
+        ldr x0, path
+        ldr x1, flags
+        ldr x2, mode
         mov x16, #5
         svc #0x80
         ret
@@ -26,6 +35,7 @@ space streams_impl_arm64 {
     asm int sys_close(int fd) {
         syntax arm64_macho
         .section __TEXT,__text
+        ldr x0, fd
         mov x16, #6
         svc #0x80
         ret
@@ -34,6 +44,7 @@ space streams_impl_arm64 {
     asm int sys_unlink(string path) {
         syntax arm64_macho
         .section __TEXT,__text
+        ldr x0, path
         mov x16, #10
         svc #0x80
         ret

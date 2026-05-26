@@ -258,25 +258,23 @@ def _build_param_map(
     offset = 8 if not is_arm64 else 0
 
     for param_type, param_name in params:
-        if param_type in ("float", "double"):
+        if is_arm64:
+            # ARM64: map ALL parameters to stack slots [sp, #N]
+            param_map[param_name] = f"[sp, #{offset}]"
+            offset += 8
+        elif param_type in ("float", "double"):
             if float_idx < len(float_regs):
                 param_map[param_name] = float_regs[float_idx]
                 float_idx += 1
             else:
-                if is_arm64:
-                    param_map[param_name] = f"[sp, #{offset}]"
-                else:
-                    param_map[param_name] = f"[rbp-{offset}]"
+                param_map[param_name] = f"[rbp-{offset}]"
                 offset += 8
         else:
             if int_idx < len(int_regs):
                 param_map[param_name] = int_regs[int_idx]
                 int_idx += 1
             else:
-                if is_arm64:
-                    param_map[param_name] = f"[sp, #{offset}]"
-                else:
-                    param_map[param_name] = f"[rbp-{offset}]"
+                param_map[param_name] = f"[rbp-{offset}]"
                 offset += 8
 
     return param_map
@@ -540,9 +538,29 @@ def assemble_asm_blocks(asm_blocks, source_path, target_arch=None, output_format
                     global_name = f"__{asm_block.name}"
                     f.write(f".global {global_name}\n")
                     f.write(f"{global_name}:\n")
-                    # Save frame pointer and link register
-                    f.write("    stp x29, x30, [sp, #-16]!\n")
-                    f.write("    mov x29, sp\n")
+                    num_params = len(asm_block.params)
+                    frame_size = 16 + num_params * 8
+                    # Allocate frame + param save area
+                    f.write(f"    sub sp, sp, #{frame_size}\n")
+                    # Save frame pointer and link register at top of frame
+                    f.write(f"    stp x29, x30, [sp, #{num_params * 8}]\n")
+                    f.write(f"    add x29, sp, #{num_params * 8}\n")
+                    # Save parameter registers to stack slots
+                    int_idx = 0
+                    float_idx = 0
+                    for param_type, param_name in asm_block.params:
+                        if param_type in ("float", "double"):
+                            if float_idx < 8:
+                                slot = param_map[param_name]
+                                reg = ARM64_FLOAT_REGS[float_idx]
+                                f.write(f"    str {reg}, {slot}\n")
+                            float_idx += 1
+                        else:
+                            if int_idx < 8:
+                                slot = param_map[param_name]
+                                reg = ARM64_INT_REGS[int_idx]
+                                f.write(f"    str {reg}, {slot}\n")
+                            int_idx += 1
                     # Write instructions (skip user's ret, we add our own)
                     for instr in updated_instructions:
                         instr_lower = instr.strip().lower()
@@ -550,8 +568,9 @@ def assemble_asm_blocks(asm_blocks, source_path, target_arch=None, output_format
                             continue  # Skip user's ret, we add our own
                         f.write(f"    {instr}\n")
                     emit_return_expr(f, asm_block, is_arm64_target=True)
-                    # Epilogue (always needed to restore x29/x30)
-                    f.write("    ldp x29, x30, [sp], #16\n")
+                    # Epilogue (restore x29/x30 and deallocate frame)
+                    f.write(f"    ldp x29, x30, [sp, #{num_params * 8}]\n")
+                    f.write(f"    add sp, sp, #{frame_size}\n")
                     f.write("    ret\n")
                 else:
                     for instr in updated_instructions:

@@ -2,8 +2,8 @@ space string_impl_x86 {
     asm int __strcmp_asm(string a, string b) {
         syntax x86_64_linux
         .section .text
-        mov rcx, rdi
-        mov rdx, rsi
+        mov rcx, a
+        mov rdx, b
     .loop:
         movzx eax, byte [rcx]
         movzx r8d, byte [rdx]
@@ -21,9 +21,9 @@ space string_impl_x86 {
     asm string __strcpy_asm(string dest, string src) {
         syntax x86_64_linux
         .section .text
-        mov rax, rdi
-        mov rcx, rdi
-        mov rdx, rsi
+        mov rax, dest
+        mov rcx, dest
+        mov rdx, src
     .loop:
         mov r8b, [rdx]
         mov [rcx], r8b
@@ -37,9 +37,9 @@ space string_impl_x86 {
     asm string __strcat_asm(string dest, string src) {
         syntax x86_64_linux
         .section .text
-        mov rax, rdi
-        mov rcx, rdi
-        mov rdx, rsi
+        mov rax, dest
+        mov rcx, dest
+        mov rdx, src
     .find_end:
         mov r8b, [rcx]
         inc rcx
@@ -59,15 +59,15 @@ space string_impl_x86 {
     asm string __strdup_asm(string s) {
         syntax x86_64_linux
         .section .text
-        mov r8, rdi
-        mov r9, rdi
+        mov r8, s
+        mov r9, s
     .len_loop:
         mov al, [r8]
         inc r8
         test al, al
         jne .len_loop
         mov rcx, r8
-        sub rcx, rdi
+        sub rcx, s
         mov rdi, rcx
         mov rsi, 1
         mov rax, 9
@@ -93,10 +93,10 @@ space string_impl_x86 {
     asm int __strchr_asm(string s, char c) {
         syntax x86_64_linux
         .section .text
-        mov rcx, rdi
-        mov rdx, rsi
+        mov rcx, s
+        mov rdx, c
         and rdx, 0xFF
-        mov r8, rdi
+        mov r8, s
     .loop:
         mov al, [rcx]
         cmp al, dl
@@ -117,9 +117,9 @@ space string_impl_x86 {
     asm int __strstr_asm(string haystack, string needle) {
         syntax x86_64_linux
         .section .text
-        mov rcx, rdi
-        mov rdx, rsi
-        mov r8, rdi
+        mov rcx, haystack
+        mov rdx, needle
+        mov r8, haystack
     .outer_loop:
         mov r9, rcx
         mov r10, rdx
@@ -150,7 +150,7 @@ space string_impl_x86 {
         syntax x86_64_linux
         .section .text
         mov rax, 0
-        mov rcx, rdi
+        mov rcx, s
     .loop:
         mov al, [rcx]
         test al, al
@@ -159,20 +159,20 @@ space string_impl_x86 {
         jmp .loop
     .done:
         mov rax, rcx
-        sub rax, rdi
+        sub rax, s
         ret
     }
 
     asm string __strncpy_asm(string dest, string src, int n) {
         syntax x86_64_linux
         .section .text
-        mov rax, rdi
-        mov rcx, rdi
-        mov rdx, rsi
-        mov r8, rdi
+        mov rax, dest
+        mov rcx, dest
+        mov rdx, src
+        mov r8, dest
     .loop:
         mov r9, rcx
-        sub r9, rdi
+        sub r9, dest
         cmp r9, rdx
         jae .done
         mov r9b, [rdx]
@@ -188,10 +188,10 @@ space string_impl_x86 {
     asm string __strncat_asm(string dest, string src, int n) {
         syntax x86_64_linux
         .section .text
-        mov rax, rdi
-        mov rcx, rdi
-        mov rdx, rsi
-        mov r8, rdi
+        mov rax, dest
+        mov rcx, dest
+        mov rdx, src
+        mov r8, dest
     .find_end:
         mov r9b, [rcx]
         inc rcx
@@ -216,9 +216,9 @@ space string_impl_x86 {
     asm int __strncmp_asm(string a, string b, int n) {
         syntax x86_64_linux
         .section .text
-        mov rcx, rdi
-        mov rdx, rsi
-        mov r8, rdi
+        mov rcx, a
+        mov rdx, b
+        mov r8, a
         mov r9, 0
     .loop:
         cmp r9, rdx

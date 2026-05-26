@@ -3,50 +3,50 @@
 import os
 import platform
 import sys
+from typing import Optional
 
 import error_msgs
 from parser import (
-    Function,
-    Declaration,
-    Compound,
-    If,
-    While,
-    Do,
-    For,
-    Return,
-    Break,
-    Continue,
-    Goto,
-    Label,
-    ExprStmt,
-    Binary,
-    Unary,
-    Literal,
-    Var,
-    Call,
-    ArrayAccess,
-    Cast,
-    Assignment,
-    Include,
-    Define,
-    InitList,
-    Switch,
-    StructDef,
-    Typedef,
-    UsingDecl,
-    ExposeDecl,
-    LibAccess,
-    SpaceDecl,
-    TypeExpr,
-    FieldAccess,
-    DesignatedInit,
-    ArrayDesignation,
-    CompoundLiteral,
-    Generic,
     Alloc,
+    ArrayAccess,
+    ArrayDesignation,
+    Assignment,
+    Binary,
+    Break,
+    Call,
+    Cast,
+    Compound,
+    CompoundLiteral,
+    Continue,
+    Declaration,
+    Define,
+    DesignatedInit,
+    Do,
+    ExposeDecl,
+    ExprStmt,
+    FieldAccess,
+    For,
     Free,
+    Function,
+    Generic,
+    Goto,
+    If,
+    Include,
+    InitList,
+    Label,
+    LibAccess,
+    Literal,
+    Return,
+    SpaceDecl,
+    StructDef,
+    Switch,
+    Typedef,
+    TypeExpr,
+    Unary,
+    UsingDecl,
+    Var,
+    While,
 )
-
 
 TYPE_MAP = {
     "string": "char*",
@@ -194,21 +194,15 @@ class CodeGen:
         self._helper_lines.append(
             "            if (new_pos + __CTRI_HEADER_SIZE + size > __CTRI_HEAP_SIZE)"
         )
-        self._helper_lines.append(
-            "                return (void*)0;"
-        )
-        self._helper_lines.append(
-            "            *(int*)(__ctri_heap + new_pos) = size;"
-        )
+        self._helper_lines.append("                return (void*)0;")
+        self._helper_lines.append("            *(int*)(__ctri_heap + new_pos) = size;")
         self._helper_lines.append(
             "            *(int*)(__ctri_heap + new_pos + sizeof(int)) = 0;"
         )
         self._helper_lines.append(
             "            *(int*)(__ctri_heap + new_pos + 2 * sizeof(int)) = 0;"
         )
-        self._helper_lines.append(
-            "            *block_next = new_pos;"
-        )
+        self._helper_lines.append("            *block_next = new_pos;")
         self._helper_lines.append(
             "            return (void*)(__ctri_heap + new_pos + __CTRI_HEADER_SIZE);"
         )
@@ -236,8 +230,7 @@ class CodeGen:
         self._helper_lines.append(
             "        int total = *(int*)(__ctri_heap + pos) + __CTRI_HEADER_SIZE + *(int*)(__ctri_heap + *next);"
         )
-        self._helper_lines.append("        *(int*)(__ctri_heap + pos) = total;"
-        )
+        self._helper_lines.append("        *(int*)(__ctri_heap + pos) = total;")
         self._helper_lines.append(
             "        *next = *(int*)(__ctri_heap + *next + 2 * sizeof(int));"
         )
@@ -269,15 +262,15 @@ class CodeGen:
         self._helper_lines.append(
             "            int combined = old_size + __CTRI_HEADER_SIZE + next_size;"
         )
-        self._helper_lines.append("            if (combined >= new_size) {"
-        )
+        self._helper_lines.append("            if (combined >= new_size) {")
         self._helper_lines.append(
             "                int remaining = combined - new_size;"
         )
         self._helper_lines.append(
             "                *(int*)(__ctri_heap + pos) = new_size;"
         )
-        self._helper_lines.append("                if (remaining > (int)(__CTRI_HEADER_SIZE)) {"
+        self._helper_lines.append(
+            "                if (remaining > (int)(__CTRI_HEADER_SIZE)) {"
         )
         self._helper_lines.append(
             "                    int next_pos = pos + __CTRI_HEADER_SIZE + new_size;"
@@ -312,8 +305,7 @@ class CodeGen:
         )
         self._helper_lines.append("    }")
         self._helper_lines.append("    __ctri_free(ptr);")
-        self._helper_lines.append("    return new_ptr;"
-        )
+        self._helper_lines.append("    return new_ptr;")
         self._helper_lines.append("}")
         self._helper_lines.append("")
 
@@ -454,7 +446,7 @@ class CodeGen:
 
         return qualifier + mapped + pointer_suffix
 
-    def _get_dynam_type(self, var_name: str) -> str:
+    def _get_dynam_type(self, var_name: str) -> Optional[str]:
         """Get the type of a variable if it's dynam or string."""
         return self._dynam_declarations.get(var_name)
 
@@ -677,6 +669,7 @@ class CodeGen:
             return f"{target} = {value}"
 
         if isinstance(node, Call):
+            callee = ""
             if isinstance(node.callee, FieldAccess):
                 method_name = node.callee.field_name
 
@@ -694,6 +687,7 @@ class CodeGen:
 
                     # Try to get the variable name from the object expression
                     # If obj_expr is a simple variable name, use it
+                    struct_name = ""
                     if isinstance(node.callee.obj, Var):
                         var_name = node.callee.obj.name
                         # Look up the variable's type in our tracking dict
@@ -832,7 +826,7 @@ class CodeGen:
                 # Also check if this specific function is exposed via expose func@lib
                 exposed_funcs = getattr(self, "_exposed_funcs", {})
                 is_func_exposed = base_callee in exposed_funcs
-                
+
                 if not is_exposed and not is_func_exposed and "@" not in callee:
                     raise ValueError(
                         error_msgs.get_error_msg(
@@ -1174,12 +1168,14 @@ class CodeGen:
             # Extract base name from source path (e.g., /tmp/test.plib -> test)
             import os
 
-            base_name = os.path.basename(self.source_path)
-            if base_name.endswith(".plib"):
-                safe_name = base_name[:-5]  # Remove .plib extension
-            else:
-                safe_name = base_name
-            safe_name = safe_name.replace("/", "_").replace("-", "_")
+            safe_name = ""
+            if self.source_path:
+                base_name = os.path.basename(self.source_path)
+                if base_name.endswith(".plib"):
+                    safe_name = base_name[:-5]  # Remove .plib extension
+                else:
+                    safe_name = base_name
+                safe_name = safe_name.replace("/", "_").replace("-", "_")
             self._emit("")
             self._emit("void " + safe_name + "_init(void) {")
             for init_line, push_lines in self._plib_global_inits:
@@ -1349,7 +1345,7 @@ class CodeGen:
                         ):
                             # Extract the actual prefix from the compound key
                             if lib_key.startswith(f"{actual_lib}_"):
-                                prefixed_lib = lib_key[len(actual_lib) + 1:]
+                                prefixed_lib = lib_key[len(actual_lib) + 1 :]
                             else:
                                 prefixed_lib = lib_key
                             self._exposed_libs.add(prefixed_lib)
@@ -1429,7 +1425,7 @@ class CodeGen:
                     if lib_key == exp_base:
                         actual_prefix = lib_key
                     elif lib_key.startswith(f"{exp_base}_"):
-                        actual_prefix = lib_key[len(exp_base) + 1:]
+                        actual_prefix = lib_key[len(exp_base) + 1 :]
                     else:
                         actual_prefix = lib_key
                     self._exposed_libs.add(actual_prefix)
@@ -1445,7 +1441,9 @@ class CodeGen:
                     for lib_key in list(self._top_level_lib_functions.keys()):
                         if lib_key in exposed_keys:
                             continue
-                        for full_func_name in self._top_level_lib_functions.get(lib_key, set()):
+                        for full_func_name in self._top_level_lib_functions.get(
+                            lib_key, set()
+                        ):
                             expected_suffix = f"_{item}"
                             if full_func_name.endswith(expected_suffix):
                                 bare_name = item
@@ -1514,10 +1512,11 @@ class CodeGen:
         return str(value)
 
     def _gen_plib_code(
-        self, lib_name: str, alias: str = None, plib_ast=None, plib_path=None
+        self, lib_name: str, alias: Optional[str] = None, plib_ast=None, plib_path=None
     ):
         """Generate code from a local plib file."""
         import os
+
         import lexer
         import parser as p
 
@@ -1542,6 +1541,7 @@ class CodeGen:
             search_name = lib_name.split("/")[-1]
 
             # Handle absolute paths directly
+            search_paths = []
             if os.path.isabs(lib_name):
                 if os.path.exists(lib_name):
                     plib_path = lib_name
@@ -1788,7 +1788,7 @@ class CodeGen:
             i for i in self._imported_plib_inits if i not in old_imported_inits
         ]
 
-    def _collect_plib_for_tree_shake(self, lib_name: str, alias: str = None):
+    def _collect_plib_for_tree_shake(self, lib_name: str, alias: Optional[str] = None):
         """Collect plib AST for tree-shaking - don't generate yet."""
         import os
 
@@ -1840,7 +1840,10 @@ class CodeGen:
                                 if f.endswith(".plib"):
                                     plib_name = f[:-5]  # Remove .plib extension
                                     # Only filter when specific items imported
-                                    if items_from_lib and plib_name not in items_from_lib:
+                                    if (
+                                        items_from_lib
+                                        and plib_name not in items_from_lib
+                                    ):
                                         continue
                                     full_plib_path = os.path.join(folder_path, f)
                                     full_lib_name = f"{search_name}/{plib_name}"
@@ -1854,7 +1857,9 @@ class CodeGen:
 
         self._collect_single_plib(plib_path, lib_name, alias)
 
-    def _collect_single_plib(self, plib_path: str, lib_name: str, alias: str = None):
+    def _collect_single_plib(
+        self, plib_path: str, lib_name: str, alias: Optional[str] = None
+    ):
         """Collect a single plib file for tree-shaking."""
         import lexer
         import parser as p
@@ -1992,6 +1997,7 @@ class CodeGen:
     def _scan_plib_folder(self, folder_name: str):
         """Scan a folder for plib files and collect their top-level functions."""
         import os
+
         import lexer
         import parser as p
 
@@ -2053,7 +2059,7 @@ class CodeGen:
                 except Exception:
                     continue
 
-    def _collect_plib_includes(self, lib_name: str, alias: str = None):
+    def _collect_plib_includes(self, lib_name: str, alias: Optional[str] = None):
         """Collect includes from a plib file into self._collected_includes."""
         import os
 
@@ -2220,7 +2226,7 @@ class CodeGen:
         for p in node.params:
             ptype = p[0]
             pname = p[1]
-            psize = p[2] if len(p) > 2 else None
+            psize: object = p[2] if len(p) > 2 else None
             # Track parameter types for len() and other operations
             if ptype != "...":
                 self._dynam_declarations[pname] = ptype
@@ -2324,7 +2330,7 @@ class CodeGen:
             # At global scope in .plib: emit declaration at file scope, track for init function
             # At local scope: emit directly
             is_plib = self._generating_plib or self._is_plib_source
-            if node.initializer and hasattr(node.initializer, "elements"):
+            if isinstance(node.initializer, InitList):
                 # Array initializer: [1, 2, 3]
                 init_vals = [self._expr(e) for e in node.initializer.elements]
                 init_count = len(init_vals)
@@ -2436,7 +2442,7 @@ class CodeGen:
                 init_expr = self._expr(node.initializer)
                 self._emit(f"char* {name} = {init_expr};")
                 return
-            if node.initializer and hasattr(node.initializer, "value"):
+            if isinstance(node.initializer, Literal):
                 # String literal: "hello"
                 init_val = node.initializer.value
                 if isinstance(init_val, str) and init_val.startswith('"'):
@@ -2452,7 +2458,7 @@ class CodeGen:
         if typ == "char" and node.initializer is not None:
             init_val = node.initializer
             if (
-                hasattr(init_val, "value")
+                isinstance(init_val, Literal)
                 and isinstance(init_val.value, str)
                 and init_val.value.startswith('"')
             ):
@@ -2693,12 +2699,7 @@ class CodeGen:
         # NOT: while ((entry = readdir(dir) != NULL)) {
 
         # Check if it's a binary with assignment on the left and comparison
-        needs_fix = False
         if isinstance(node.cond, Binary) and isinstance(node.cond.left, Assignment):
-            # The binary left is an assignment - need special handling
-            needs_fix = True
-
-        if needs_fix:
             # Reconstruct: (assignment) op right
             left = self._expr(node.cond.left)
             op = node.cond.op
@@ -2962,19 +2963,29 @@ class CodeGen:
             if node.initializer:
                 init_expr = self._expr(node.initializer)
                 _use_wide_cast = False
-                if isinstance(node.byte_size, Literal) and isinstance(node.initializer, Literal):
+                if isinstance(node.byte_size, Literal) and isinstance(
+                    node.initializer, Literal
+                ):
                     try:
                         _bs = int(node.byte_size.value)
                         _ns = self._native_size(node.alloc_type)
                         if _bs > _ns:
-                            _val = self._parse_integer_initializer(node.initializer.value)
+                            _val = self._parse_integer_initializer(
+                                node.initializer.value
+                            )
                             if _val is not None:
-                                _nmin, _nmax = self._native_integer_range(node.alloc_type)
+                                _nmin, _nmax = self._native_integer_range(
+                                    node.alloc_type
+                                )
                                 if _val < _nmin or _val > _nmax:
                                     if _val >= 0:
-                                        self._emit(f"*(unsigned*){node.name} = (unsigned)({init_expr});")
+                                        self._emit(
+                                            f"*(unsigned*){node.name} = (unsigned)({init_expr});"
+                                        )
                                     else:
-                                        self._emit(f"*(long long*){node.name} = (long long)({init_expr});")
+                                        self._emit(
+                                            f"*(long long*){node.name} = (long long)({init_expr});"
+                                        )
                                     _use_wide_cast = True
                     except (TypeError, ValueError):
                         pass
@@ -3008,7 +3019,9 @@ class CodeGen:
         }
         if node.alloc_type not in scalar_types or node.initializer is None:
             return
-        if not isinstance(node.byte_size, Literal) or not isinstance(node.initializer, Literal):
+        if not isinstance(node.byte_size, Literal) or not isinstance(
+            node.initializer, Literal
+        ):
             return
 
         try:
@@ -3017,7 +3030,9 @@ class CodeGen:
             return
 
         if byte_size <= 0:
-            raise SyntaxError(f"allocate {node.alloc_type} {node.name} byte size must be positive")
+            raise SyntaxError(
+                f"allocate {node.alloc_type} {node.name} byte size must be positive"
+            )
 
         if node.alloc_type in ("float", "double"):
             self._validate_float_allocation_initializer(node, byte_size)
@@ -3040,7 +3055,7 @@ class CodeGen:
         bit_count = byte_size * 8
         if node.alloc_type == "unsigned":
             byte_min = 0
-            byte_max = (2 ** bit_count) - 1
+            byte_max = (2**bit_count) - 1
         else:
             byte_min = -(2 ** (bit_count - 1))
             byte_max = (2 ** (bit_count - 1)) - 1
@@ -3059,16 +3074,21 @@ class CodeGen:
                 f"native C {node.alloc_type} size {native_size}"
             )
 
-        raw_value = str(node.initializer.value).rstrip("fFlL")
+        initializer = node.initializer
+        if not isinstance(initializer, Literal):
+            return
+        raw_value = str(initializer.value).rstrip("fFlL")
         try:
             value = float(raw_value)
         except (TypeError, ValueError):
             return
 
-        native_max = 3.4028235e38 if node.alloc_type == "float" else 1.7976931348623157e308
+        native_max = (
+            3.4028235e38 if node.alloc_type == "float" else 1.7976931348623157e308
+        )
         if value < -native_max or value > native_max:
             raise SyntaxError(
-                f"initializer {node.initializer.value} for allocate {node.alloc_type} {node.name} "
+                f"initializer {initializer.value} for allocate {node.alloc_type} {node.name} "
                 f"exceeds native C {node.alloc_type} range ({-native_max}..{native_max})"
             )
 
@@ -3102,11 +3122,11 @@ class CodeGen:
 
     def _native_integer_range(self, type_name: str):
         ranges = {
-            "char": (-(2 ** 7), (2 ** 7) - 1),
-            "short": (-(2 ** 15), (2 ** 15) - 1),
-            "int": (-(2 ** 31), (2 ** 31) - 1),
-            "signed": (-(2 ** 31), (2 ** 31) - 1),
-            "unsigned": (0, (2 ** 32) - 1),
-            "long": (-(2 ** 63), (2 ** 63) - 1),
+            "char": (-(2**7), (2**7) - 1),
+            "short": (-(2**15), (2**15) - 1),
+            "int": (-(2**31), (2**31) - 1),
+            "signed": (-(2**31), (2**31) - 1),
+            "unsigned": (0, (2**32) - 1),
+            "long": (-(2**63), (2**63) - 1),
         }
         return ranges[type_name]
