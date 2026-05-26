@@ -1,29 +1,31 @@
 """Optimizer for C△ compiler. C11 compliant."""
 
-from typing import Dict, List, Any, Optional
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from parser import (
-    Program,
-    Function,
-    Declaration,
-    Compound,
-    If,
-    While,
-    For,
-    Switch,
-    Return,
-    Break,
-    ExprStmt,
     Assignment,
     Binary,
+    Break,
+    Call,
+    Compound,
+    Declaration,
+    ExprStmt,
+    For,
+    Function,
+    If,
+    Program,
+    Return,
+    Switch,
     Unary,
     Var,
-    Call,
+    While,
 )
 from struct_layout import (
-    compute_layout,
     StructLayout,
+    compute_layout,
     suggest_reordering,
 )
 

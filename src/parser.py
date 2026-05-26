@@ -1288,7 +1288,7 @@ class Parser:
             # anywhere; they are emitted into the generated data section.
             if self.peek()[0] in (
                 "STRING",
-    "BOOLEAN",
+                "BOOLEAN",
                 "INT",
                 "CHAR",
                 "FLOAT",
@@ -1832,9 +1832,7 @@ class Parser:
                         dim = self.advance()[1] if self.peek()[0] != "RBRACKET" else ""
                         array_suffix += f"[{dim}]"
                         self.expect("RBRACKET")
-                    full_name = (
-                        f"{fn}{array_suffix}" if array_suffix else fn
-                    )
+                    full_name = f"{fn}{array_suffix}" if array_suffix else fn
                     fields.append((field_type, full_name))
                 self.expect("SEMICOLON")
             self.expect("RBRACE")
@@ -2087,7 +2085,7 @@ class Parser:
                             return Declaration(
                                 "extern (func prototype)", "_skipped", None
                             )
-                except:
+                except Exception:
                     pass
                 self.i = saved_i  # not a function prototype
         # Handle typedef aliases

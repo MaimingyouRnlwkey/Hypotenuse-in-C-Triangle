@@ -567,7 +567,7 @@ class CodeGen:
                             try:
                                 int(val)
                                 return True
-                            except:
+                            except Exception:
                                 pass
                     return False
 
@@ -1311,12 +1311,12 @@ class CodeGen:
 
                 # Check if the library was imported
                 lib_imported = any(
-                    (imp.source == l)
-                    or (imp.source == f"<{l}>")
-                    or (imp.source == f'"{l}"')
-                    or (imp.source.startswith(f"<{l}/"))
+                    (imp.source == lib_ref)
+                    or (imp.source == f"<{lib_ref}>")
+                    or (imp.source == f'"{lib_ref}"')
+                    or (imp.source.startswith(f"<{lib_ref}/"))
                     for imp in imports
-                    for l in [lib_name, actual_lib]
+                    for lib_ref in [lib_name, actual_lib]
                 )
                 # Also check if specific function was imported
                 func_imported = any(imp.item == func_name for imp in imports)
