@@ -94,6 +94,7 @@ int size = len(numbers);
 tuple t = [1, "hello", 3.14, 'x'];
 auto first = t[0];    // 1
 auto second = t[1];   // "hello"
+t.push("added");      // pushed new data
 int t_len = len(t);   // 4
 ```
 
@@ -107,7 +108,7 @@ Constructors, member functions, **no inheritance**, not a native type.
 
 ```c
 struct Vec2(float x, float y) {
-    init { self.x = 0.0; self.y = 0.0; }
+    init { int self.x = 0.0; int self.y = 0.0; }
     end { /* cleanup */ }
 
     float length() {
@@ -127,15 +128,15 @@ Constructors, member functions, **inheritance**, becomes a native type.
 
 ```c
 typed struct Animal(string name) {
-    init {...}
+    init {string self.name = name;}
     string speak() { return "..."; }
-    end {...}
+    end { /* clean up */ }
 }
 
 typed struct Dog&Animal(string name) {
-    init {...}
+    init { /* init */ }
     string speak() { return "Woof!"; }
-    end {...}
+    end { /* clean up */ }
 }
 
 Dog d = Dog("Rex");
@@ -146,10 +147,10 @@ printd("%s", d.speak());   // Woof!
 
 ```c
 typed struct PoliceDog&Dog&Animal(string name, int badge) {
-    init {...}
+    init { /* init */ }
     // Constructor order: Animal -> Dog -> PoliceDog
     // Conflict resolution: obj.Animal.speak(), obj.Dog.speak()
-    end {...}
+    end { /* clean up */ }
 }
 ```
 

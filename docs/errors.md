@@ -20,6 +20,7 @@ Raised by the **parser** when the token stream doesn't match expected grammar.
 | `Expected SEMICOLON`                     | Missing `;`                               | `int x = 5`         |
 | `Unexpected end of file`                 | Unclosed `{` block                        | Missing `}`         |
 | `Unexpected token in primary expression` | Invalid token in an expression            | `int + 3`           |
+**These are just examples.**
 
 ---
 
@@ -67,6 +68,6 @@ Raised by the **simulation pass**.
 
 ## Debugging Tips
 
-- Run with `-t` to see the full token stream and scope graph before errors hit.
+- Run with `-t` or `-p` to see the full token stream or scope graph before errors hit.
 - Check for unclosed `{` braces — the most common cause of EOF errors.
 - Remember that `for` loop init declarations are scoped to the loop, not the enclosing function.

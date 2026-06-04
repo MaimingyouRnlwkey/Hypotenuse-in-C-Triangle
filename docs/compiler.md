@@ -119,10 +119,10 @@ python3 src/main.py -i mylib.plib
 
 ## Target
 
-| Property          | Value      |
-| ----------------- | ---------- |
-| Architecture      | x86_64     |
-| Platform          | Linux      |
-| Output format     | ELF        |
-| Backend           | GCC + NASM |
-| Compiler language | Python 3   |
+| Details           | Linux      | MacOS      |
+| ----------------- | ---------- | ---------- |
+| Architecture      | x86_64     | arm64      |
+| Platform          | Linux      | MacOS      |
+| Output format     | ELF        | machO      |
+| Backend           | GCC + NASM | GCC + NASM |
+| Compiler language | Python 3   | Python 3   |

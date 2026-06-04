@@ -67,7 +67,7 @@ printd@lib("value: %d\n", 42);
 using functionName&myVar
 ```
 
-> The compiler auto-imports what is used — manual `using` is optional style.
+> The compiler auto-imports what is used. That includes all functions and variables referenced in a file. If none are present, the compiler will not insert them.
 
 ---
 
@@ -124,7 +124,7 @@ int add(int a, int b) {
 }
 
 // Variadic argument stream *NEW*
-int sum(auto args*) {
+int sum(tuple args*) {
     // args is a pointer to the argument stream
 }
 ```
@@ -274,4 +274,9 @@ expose plstd
 // Expose a specific namespace
 expose mySpace
 random()   // now accessible directly
+
+// Declare a space
+space mySpace {
+	int myspacevar = 0;
+}
 ```
