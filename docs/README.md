@@ -51,5 +51,8 @@ C△ is designed around three principles:
 - **Simple over clever** — clean syntax that stays close to C's spirit
 - **Extensible over fixed** — the language can grow itself through libraries
 
-The compiler is called **The Hypotenuse Compiler** and is available at:
+The compiler is called **The Hypotenuse Compiler**. Detailed documentation is available at:
+<https://hypotenuse.mintlify.app>
+
+The compiler source is available at:
 <https://github.com/setuser1/The-Hypotenuse-Compiler>
