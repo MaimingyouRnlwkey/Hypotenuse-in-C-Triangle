@@ -2,17 +2,22 @@
 
 PYINSTALLER_NAME := hypotenuse
 
+VENV := .venv
+PYTHON := $(VENV)/bin/python
+
 # ---------------------------------------------------------------
-# install: install only the packages needed to build the binary
+# install: create a virtual environment and install only build tools
 # ---------------------------------------------------------------
 install:
-	python3 -m pip install --quiet pyinstaller
+	python3 -m venv $(VENV)
+	$(PYTHON) -m pip install --quiet --upgrade pip
+	$(PYTHON) -m pip install --quiet pyinstaller
 
 # ---------------------------------------------------------------
 # build: create the standalone compiler binary
 # ---------------------------------------------------------------
 build: install
-	python3 -m PyInstaller --onefile --name $(PYINSTALLER_NAME) --add-data "src:src" src/main.py
+	$(PYTHON) -m PyInstaller --onefile --name $(PYINSTALLER_NAME) --add-data "src:src" src/main.py
 
 # ---------------------------------------------------------------
 # full-install: install the built binary and standard library
