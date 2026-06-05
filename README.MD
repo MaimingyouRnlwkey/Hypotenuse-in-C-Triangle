@@ -10,7 +10,7 @@ Hypotenuse is the compiler for **C△ (C Triangle)** — a new systems programmi
 
 C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, modern, and designed to be learnable.
 
-> *The future of C and the end of C++*
+> _The future of C and the end of C++_
 
 ---
 
@@ -18,14 +18,19 @@ C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux EL
 
 The C△ compiler and standard library support multiple architectures:
 
-| Architecture | Platform | Format | Status |
-|---|---|---|---|
-| **x86_64** | Linux | ELF64 | Partial |
-| **ARM64** | macOS | Mach-O64 | Partial |
+| Architecture | Platform | Format   | Status  |
+| ------------ | -------- | -------- | ------- |
+| **x86_64**   | Linux    | ELF64    | Partial |
+| **ARM64**    | macOS    | Mach-O64 | Partial |
+
 ---
+
 ## MintLify Documentation (Much more detailed)
+
 ### https://hypotenuse.mintlify.app
+
 ---
+
 ### Standard Library (plstd) Architecture Support
 
 - **printd.plib** — Type-aware printing with conditional compilation for both x86_64 Linux and ARM64 macOS
@@ -61,6 +66,9 @@ make full-install-x86_64-elf
 ## Documentation
 
 Full language and compiler documentation lives in the [`docs/`](docs/) folder.
+
+Detailed online documentation is available at:
+<https://hypotenuse.mintlify.app>
 
 ---
 
