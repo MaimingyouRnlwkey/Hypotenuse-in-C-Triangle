@@ -1,18 +1,17 @@
 # .github/labeler.yml
 documentation:
-  - '**/*.md'
-  - '**/*.txt'
-
-enhancement:
-  - '**/*.py'
-  - '**/*.ctri'
-  - 'Makefile'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - '**/*.txt'
 
 update/addition:
-  - '**/*.py'
-  - '**/*.txt'
-  - '**/*.ctri'
-  - 'Makefile'
-  - '.gitignore'
-  - '.gitattributes'
-  - '.github/workflows/**/*.yml'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.py'
+          - '**/*.txt'
+          - '**/*.ctri'
+          - 'Makefile'
+          - '.gitignore'
+          - '.gitattributes'
+          - '.github/workflows/**/*.yml'
