@@ -261,7 +261,7 @@ binary: build
 # clean: remove build artifacts
 # ---------------------------------------------------------------
 clean:
-	rm -rf build dist *.spec __pycache__
+	rm -rf build dist *.spec __pycache__ release
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 # ---------------------------------------------------------------
@@ -272,19 +272,19 @@ full-install: build
 		cp dist/hypotenuse /usr/local/bin/hypotenuse; \
 		chmod +x /usr/local/bin/hypotenuse; \
 		echo "Installed to /usr/local/bin/hypotenuse"; \
-		sudo mkdir -p /usr/lib/PLIBS/plstd; \
-		echo "Created /usr/lib/PLIBS/plstd"; \
-		sudo cp -r plstd/* /usr/lib/PLIBS/plstd/; \
-		echo "Copied plstd contents to /usr/lib/PLIBS/plstd"; \
+		sudo mkdir -p /usr/lib/PLIBS; \
+		echo "Created /usr/lib/PLIBS"; \
+		sudo cp -r plstd /usr/lib/PLIBS/; \
+		echo "Copied plstd folder to /usr/lib/PLIBS"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
 		chmod +x ~/.local/bin/hypotenuse; \
 		echo "Installed to ~/.local/bin/hypotenuse"; \
-		mkdir -p ~/.local/lib/PLIBS/plstd; \
-		echo "Created ~/.local/lib/PLIBS/plstd"; \
-		cp -r plstd/* ~/.local/lib/PLIBS/plstd/; \
-		echo "Copied plstd contents to ~/.local/lib/PLIBS/plstd"; \
+		mkdir -p ~/.local/lib/PLIBS; \
+		echo "Created ~/.local/lib/PLIBS"; \
+		cp -r plstd ~/.local/lib/PLIBS/; \
+		echo "Copied plstd folder to ~/.local/lib/PLIBS"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 
@@ -296,19 +296,19 @@ full-install-x86_64-elf: build-x86_64-elf
 		cp dist/$(X86_64_ELF_NAME) /usr/local/bin/hypotenuse; \
 		chmod +x /usr/local/bin/hypotenuse; \
 		echo "Installed Linux x86_64 ELF compiler to /usr/local/bin/hypotenuse"; \
-		sudo mkdir -p /usr/lib/PLIBS/plstd; \
-		echo "Created /usr/lib/PLIBS/plstd"; \
-		sudo cp -r plstd/* /usr/lib/PLIBS/plstd/; \
-		echo "Copied plstd contents to /usr/lib/PLIBS/plstd"; \
+		sudo mkdir -p /usr/lib/PLIBS; \
+		echo "Created /usr/lib/PLIBS"; \
+		sudo cp -r plstd /usr/lib/PLIBS/; \
+		echo "Copied plstd folder to /usr/lib/PLIBS"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/$(X86_64_ELF_NAME) ~/.local/bin/hypotenuse; \
 		chmod +x ~/.local/bin/hypotenuse; \
 		echo "Installed Linux x86_64 ELF compiler to ~/.local/bin/hypotenuse"; \
-		mkdir -p ~/.local/lib/PLIBS/plstd; \
-		echo "Created ~/.local/lib/PLIBS/plstd"; \
-		cp -r plstd/* ~/.local/lib/PLIBS/plstd/; \
-		echo "Copied plstd contents to ~/.local/lib/PLIBS/plstd"; \
+		mkdir -p ~/.local/lib/PLIBS; \
+		echo "Created ~/.local/lib/PLIBS"; \
+		cp -r plstd ~/.local/lib/PLIBS/; \
+		echo "Copied plstd folder to ~/.local/lib/PLIBS"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 
