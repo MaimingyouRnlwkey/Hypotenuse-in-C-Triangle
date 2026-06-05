@@ -82,14 +82,20 @@ jobs:
           name: hypotenuse-x86_64
           path: release
 
+      - name: Compute release version
+        id: version
+        run: |
+          VERSION=$(date -u +'%y.%V')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub prerelease
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: prerelease-${{ github.run_number }}
-          release_name: "Weekly prerelease #${{ github.run_number }}"
+          tag_name: ${{ steps.version.outputs.version }}
+          release_name: "Weekly prerelease ${{ steps.version.outputs.version }}"
           body: |
             Weekly pre-release packages built every Friday.
             Includes Makefile, plstd library, and the actual compiler binary.
