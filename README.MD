@@ -25,12 +25,6 @@ The C△ compiler and standard library support multiple architectures:
 
 ---
 
-## MintLify Documentation (Much more detailed)
-
-### https://hypotenuse.mintlify.app
-
----
-
 ### Standard Library (plstd) Architecture Support
 
 - **printd.plib** — Type-aware printing with conditional compilation for both x86_64 Linux and ARM64 macOS
