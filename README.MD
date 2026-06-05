@@ -23,6 +23,8 @@ The C△ compiler and standard library support multiple architectures:
 | **x86_64** | Linux | ELF64 | Partial |
 | **ARM64** | macOS | Mach-O64 | Partial |
 
+#### hypotenuse.mintlify.app
+
 ### Standard Library (plstd) Architecture Support
 
 - **printd.plib** — Type-aware printing with conditional compilation for both x86_64 Linux and ARM64 macOS
