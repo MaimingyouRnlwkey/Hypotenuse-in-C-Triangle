@@ -22,11 +22,11 @@ jobs:
       - name: Package ARM64 release
         run: |
           mkdir -p release/package
-          cp Makefile release/package/
+          cp makefile release/package/
           cp -r plstd release/package/
           cp dist/hypotenuse release/package/
           cd release/package
-          zip -r ../hypotenuse-arm64.zip Makefile plstd hypotenuse
+          zip -r ../hypotenuse-arm64.zip makefile plstd hypotenuse
 
       - name: Upload ARM64 package
         uses: actions/upload-artifact@v4
@@ -50,11 +50,11 @@ jobs:
       - name: Package x86_64 release
         run: |
           mkdir -p release/package
-          cp Makefile release/package/
+          cp makefile release/package/
           cp -r plstd release/package/
           cp dist/hypotenuse release/package/
           cd release/package
-          zip -r ../hypotenuse-x86_64.zip Makefile plstd hypotenuse
+          zip -r ../hypotenuse-x86_64.zip makefile plstd hypotenuse
 
       - name: Upload x86_64 package
         uses: actions/upload-artifact@v4
