@@ -1,0 +1,59 @@
+.PHONY: install build full-install clean uninstall
+
+PYINSTALLER_NAME := hypotenuse
+
+# ---------------------------------------------------------------
+# install: install only the packages needed to build the binary
+# ---------------------------------------------------------------
+install:
+	python3 -m pip install --quiet pyinstaller
+
+# ---------------------------------------------------------------
+# build: create the standalone compiler binary
+# ---------------------------------------------------------------
+build: install
+	python3 -m PyInstaller --onefile --name $(PYINSTALLER_NAME) --add-data "src:src" src/main.py
+
+# ---------------------------------------------------------------
+# full-install: install the built binary and standard library
+# ---------------------------------------------------------------
+full-install: build
+	@if [ -w /usr/local/bin ]; then \
+		cp dist/$(PYINSTALLER_NAME) /usr/local/bin/$(PYINSTALLER_NAME); \
+		chmod +x /usr/local/bin/$(PYINSTALLER_NAME); \
+		echo "Installed to /usr/local/bin/$(PYINSTALLER_NAME)"; \
+		sudo mkdir -p /usr/lib/PLIBS; \
+		echo "Created /usr/lib/PLIBS"; \
+		sudo cp -r plstd /usr/lib/PLIBS/; \
+		echo "Copied plstd folder to /usr/lib/PLIBS"; \
+	else \
+		mkdir -p ~/.local/bin; \
+		cp dist/$(PYINSTALLER_NAME) ~/.local/bin/$(PYINSTALLER_NAME); \
+		chmod +x ~/.local/bin/$(PYINSTALLER_NAME); \
+		echo "Installed to ~/.local/bin/$(PYINSTALLER_NAME)"; \
+		mkdir -p ~/.local/lib/PLIBS; \
+		echo "Created ~/.local/lib/PLIBS"; \
+		cp -r plstd ~/.local/lib/PLIBS/; \
+		echo "Copied plstd folder to ~/.local/lib/PLIBS"; \
+		echo "Add ~/.local/bin to your PATH if not already present"; \
+	fi
+
+# ---------------------------------------------------------------
+# clean: remove build artifacts for the weekly job
+# ---------------------------------------------------------------
+clean:
+	rm -rf build dist *.spec __pycache__
+
+# ---------------------------------------------------------------
+# uninstall: remove the installed binary from user paths
+# ---------------------------------------------------------------
+uninstall:
+	@if [ -f /usr/local/bin/$(PYINSTALLER_NAME) ]; then \
+		rm /usr/local/bin/$(PYINSTALLER_NAME); \
+		echo "Removed /usr/local/bin/$(PYINSTALLER_NAME)"; \
+	elif [ -f ~/.local/bin/$(PYINSTALLER_NAME) ]; then \
+		rm ~/.local/bin/$(PYINSTALLER_NAME); \
+		echo "Removed ~/.local/bin/$(PYINSTALLER_NAME)"; \
+	else \
+		echo "$(PYINSTALLER_NAME) not found in /usr/local/bin or ~/.local/bin"; \
+	fi
