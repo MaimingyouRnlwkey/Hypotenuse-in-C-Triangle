@@ -16,8 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build and install macOS binary
-        run: make -f makefile.weekly full-install
+      - name: Build macOS binary
+        run: make build
 
       - name: Package macOS release
         run: |
@@ -41,15 +41,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build and install x86_64 binary
-        run: make -f makefile.weekly full-install
+      - name: Build x86_64 binary
+        run: make build
 
       - name: Package x86_64 release
         run: |
           mkdir -p release/package
           cp makefile.weekly release/package/makefile
           cp -r plstd release/package/
-          cp dist/hypotenuse release/package/
+          cp dist/hypotenuse release/package/hypotenuse
           cd release/package
           zip -r ../hypotenuse-x86_64.zip makefile plstd hypotenuse
 
