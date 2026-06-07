@@ -817,3 +817,4 @@ CMakeUserPresets.json
 # PyInstaller build artifacts
 build/
 hypotenuse.spec
+docs/.obsidian/themes/Shimmering Focus/theme.css
