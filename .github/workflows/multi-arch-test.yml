@@ -83,19 +83,19 @@ jobs:
         done
         echo "Verified $count x86_64 ELF binaries"
 
-    - name: Test x86_64 binaries (sample)
-      run: |
-        echo "Testing x86_64 binaries (sample run)..."
-        for test_file in test/baseline.ctri test/test_asm_main.ctri; do
-          if [ -f "$test_file" ]; then
-            base_name=$(basename "$test_file" .ctri)
-            elf="build/x86_64/${base_name}"
-            if [ -f "$elf" ]; then
-              echo "Running $base_name..."
-              timeout 5 "$elf" > /dev/null 2>&1 && echo "✓ $base_name executed" || echo "⚠ $base_name (expected for some tests)"
-            fi
-          fi
-        done
+     - name: Test x86_64 binaries (sample)
+       run: |
+         echo "Testing x86_64 binaries (sample run)..."
+         for test_file in test/baseline.ctri test/test_asm_main.ctri test/test-108.ctri test/test-109.ctri; do
+           if [ -f "$test_file" ]; then
+             base_name=$(basename "$test_file" .ctri)
+             elf="build/x86_64/${base_name}"
+             if [ -f "$elf" ]; then
+               echo "Running $base_name..."
+               timeout 5 "$elf" > /dev/null 2>&1 && echo "✓ $base_name executed" || echo "⚠ $base_name (expected for some tests)"
+             fi
+           fi
+         done
 
     - name: Upload x86_64 artifacts
       if: always()
@@ -182,28 +182,28 @@ jobs:
         done
         echo "Verified $count ARM64 ELF binaries"
 
-    - name: Test ARM64 binaries with QEMU
-      run: |
-        echo "Testing ARM64 binaries with QEMU emulation..."
-        tested=0
-        passed=0
-        for test_file in test/baseline.ctri test/test_asm_main.ctri; do
-          if [ -f "$test_file" ]; then
-            base_name=$(basename "$test_file" .ctri)
-            elf="build/arm64/${base_name}"
-            if [ -f "$elf" ]; then
-              tested=$((tested + 1))
-              echo "Running $base_name under QEMU..."
-              if timeout 5 qemu-aarch64-static "$elf" > /dev/null 2>&1; then
-                echo "✓ $base_name executed successfully"
-                passed=$((passed + 1))
-              else
-                echo "⚠ $base_name execution (expected for some tests)"
-              fi
-            fi
-          fi
-        done
-        echo "ARM64 QEMU tests: $passed/$tested passed"
+     - name: Test ARM64 binaries with QEMU
+       run: |
+         echo "Testing ARM64 binaries with QEMU emulation..."
+         tested=0
+         passed=0
+         for test_file in test/baseline.ctri test/test_asm_main.ctri test/test-108.ctri test/test-109.ctri; do
+           if [ -f "$test_file" ]; then
+             base_name=$(basename "$test_file" .ctri)
+             elf="build/arm64/${base_name}"
+             if [ -f "$elf" ]; then
+               tested=$((tested + 1))
+               echo "Running $base_name under QEMU..."
+               if timeout 5 qemu-aarch64-static "$elf" > /dev/null 2>&1; then
+                 echo "✓ $base_name executed successfully"
+                 passed=$((passed + 1))
+               else
+                 echo "⚠ $base_name execution (expected for some tests)"
+               fi
+             fi
+           fi
+         done
+         echo "ARM64 QEMU tests: $passed/$tested passed"
 
     - name: Upload ARM64 artifacts
       if: always()

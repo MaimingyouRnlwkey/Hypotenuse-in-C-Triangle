@@ -1,8 +1,0 @@
-// Test exposing individual functions
-using printd from <plstd>;
-expose printd@plstd;
-
-int main(void) {
-    printd("Hello, World!");
-    return 0;
-}
