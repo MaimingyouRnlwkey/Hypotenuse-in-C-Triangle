@@ -12,8 +12,8 @@ Thank you for your interest in contributing! 🎉 Whether you're fixing bugs, ad
 
 1. 🍴 Fork the repository or create a branch from `main`
 2. 🔨 Make your changes on a feature branch (e.g. `fix/my-bug`, `feat/new-feature`)
-3. ✅ Make sure all tests pass: `make test`
-4. 📝 Open a **Pull Request** targeting `main`
+3. ✅ Make sure all tests pass: `make test` - **DO SOME SELF-TESTING BEYOND THE PROVIDED FILES**
+4. 📝 Open a **Pull Request** targeting `main` - **MAKE SURE TO ADD TEST RESULTS**
 5. 👀 Request review from a maintainer
 6. 🎉 Merge after approval!
 
