@@ -25,13 +25,13 @@ Thank you for your interest in contributing! 🎉 Whether you're fixing bugs, ad
 
 | Prefix      | Purpose                          |
 | ----------- | -------------------------------- |
-| `fix/`      | Bug fixes 🐛                     |
-| `feat/`     | New features ✨                  |
-| `refactor/` | Code restructuring 🔧            |
-| `docs/`     | Documentation updates 📝         |
-| `assets/`   | Images, logos, media 🖼️          |
-| `test/`     | Tests and test infrastructure 🧪 |
-| `patch/`    | Hotfixes and patches 🩹          |
+| `fix/issue`     | Bug fixes 🐛                 |
+| `feat/feat`     | New features ✨              |
+| `refactor/code` | Code restructuring 🔧        |
+| `docs/document` | Documentation updates 📝     |
+| `assets/asset`  | Images, logos, media 🖼️      |
+| `test/check`    | Tests and test infrastructure 🧪 |
+| `patch/fix`     | Hotfixes and patches 🩹      |
 
 ---
 
