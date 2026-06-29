@@ -21,7 +21,6 @@ The C△ compiler and standard library support multiple architectures:
 | Architecture | Platform | Format   | Status  |
 | ------------ | -------- | -------- | ------- |
 | **x86_64**   | Linux    | ELF64    | Partial |
-| **ARM64**    | macOS    | Mach-O64 | Partial |
 
 ---
 
