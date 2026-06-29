@@ -47,11 +47,10 @@ Tests live in the `test/` directory. Add a test for any bug you fix or feature y
 
 ## ✍️ Code Style
 
-- 🐍 Python 3 — follow PEP 8
-- 📝 Document new functions and classes with docstrings
-- 🧹 Keep functions focused — one responsibility per function
-- 🔑 Use descriptive variable names
-- 💬 Leave comments for non-obvious logic
+- Follow PEP-8
+- Code like Yoda from Star Wars
+- Keep everything safe and tidy
+- Comment your code
 
 ---
 
