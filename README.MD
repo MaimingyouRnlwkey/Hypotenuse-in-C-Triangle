@@ -1,16 +1,14 @@
-# The Hypotenuse Compiler
+# The Hypotenuse Compiler - Self Host Variant
 
 <p align="center">
   <img src="assets/logo.png" alt="C△ Logo"/>
 </p>
 
-## What is C△?
+---
 
-Hypotenuse is the compiler for **C△ (C Triangle)** — a new systems programming language born out of frustration with C's featurelessness and C++'s overwhelming complexity. A middle ground had to be born!
+## This is the self-hosted version
 
-C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, modern, and designed to be learnable.
-
-> _The future of C and the end of C++_
+This variant of the compiler will contain more features, which also means more bugs...
 
 ---
 
@@ -41,7 +39,7 @@ The C△ compiler and standard library support multiple architectures:
 3. Run `make full-install`
 
 ```bash
-git clone https://github.com/setuser1/The-Hypotenuse-Compiler
+git clone https://github.com/MaimingyouRnlwkey/Hypotenuse-in-C-Triangle
 cd The-Hypotenuse-Compiler
 make full-install
 ```
