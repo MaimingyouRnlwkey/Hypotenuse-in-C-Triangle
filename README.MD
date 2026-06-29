@@ -31,7 +31,6 @@ The C△ compiler and standard library support multiple architectures:
 - **streamer.plib** — File I/O and syscall wrappers supporting both architectures
 - **Syscalls** — All syscalls use platform-specific conventions:
   - x86_64: Linux syscall ABI (`mov rax, N; syscall`)
-  - ARM64: macOS syscall ABI (`mov x16, N; svc #0x80`)
 
 ---
 
