@@ -125,7 +125,7 @@ int spoon() {
     return pid;
 }
 
-int spoon_thread() {
+int spawn_spoon() {
     allocate int _tid[1];
     allocate int _tls[16];
     allocate char _stack[16384];
