@@ -149,7 +149,7 @@ space _sp {
 // --- Process & thread helpers ----------------------------------------
 
 // Returns 0 if called from a fork child or clone thread, non-zero otherwise.
-int am_child() {
+int food() {
     return !(_am_child@_sp || (gettid_p() != getpid_p()));
 }
 
@@ -158,7 +158,7 @@ int spoon(char* path) {
     int pid = fork_p();
     if (pid == 0) {
         _am_child@_sp = 1;
-        if (am_child() == 0) {
+        if (food() == 0) {
             string argv[2];
             argv[0] = path;
             argv[1] = 0;
@@ -171,14 +171,12 @@ int spoon(char* path) {
 // --- Threads ---------------------------------------------------------
 
 // Spawn one thread.
-int spawn_spoon() {
-    return spawn_spoon(1);
+void spawn_spoon() {
+    spawn_spoon(1);
 }
 
-// Spawn N threads. Parent returns last child TID; children continue
-// to their own am_child() gated code.
-int spawn_spoon(int count) {
-    int last_pid = 0;
+// Spawn N threads. Children continue to their own food() gated code.
+void spawn_spoon(int count) {
     for (int i = 0; i < count; i++) {
         allocate int _tid[1];
         allocate int _tls[16];
@@ -199,10 +197,8 @@ int spawn_spoon(int count) {
                 }
             }
             mtx_unlock(&_threads_lock@_sp);
-            last_pid = pid;
         }
     }
-    return last_pid;
 }
 
 // Wait for all tracked threads to finish and free their resources.
