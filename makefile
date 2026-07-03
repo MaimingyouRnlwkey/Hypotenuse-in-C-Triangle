@@ -280,8 +280,8 @@ full-install: build
 		echo "Installed to /usr/local/bin/hypotenuse"; \
 		sudo mkdir -p /usr/lib/PLIBS; \
 		echo "Created /usr/lib/PLIBS"; \
-		sudo cp -r plstd /usr/lib/PLIBS/; \
-		echo "Copied plstd folder to /usr/lib/PLIBS"; \
+		sudo cp -r bracket /usr/lib/PLIBS/; \
+		echo "Copied bracket folder to /usr/lib/PLIBS"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/hypotenuse ~/.local/bin/hypotenuse; \
@@ -289,8 +289,8 @@ full-install: build
 		echo "Installed to ~/.local/bin/hypotenuse"; \
 		mkdir -p ~/.local/lib/PLIBS; \
 		echo "Created ~/.local/lib/PLIBS"; \
-		cp -r plstd ~/.local/lib/PLIBS/; \
-		echo "Copied plstd folder to ~/.local/lib/PLIBS"; \
+		cp -r bracket ~/.local/lib/PLIBS/; \
+		echo "Copied bracket folder to ~/.local/lib/PLIBS"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 
@@ -304,8 +304,8 @@ full-install-x86_64-elf: build-x86_64-elf
 		echo "Installed Linux x86_64 ELF compiler to /usr/local/bin/hypotenuse"; \
 		sudo mkdir -p /usr/lib/PLIBS; \
 		echo "Created /usr/lib/PLIBS"; \
-		sudo cp -r plstd /usr/lib/PLIBS/; \
-		echo "Copied plstd folder to /usr/lib/PLIBS"; \
+		sudo cp -r bracket /usr/lib/PLIBS/; \
+		echo "Copied bracket folder to /usr/lib/PLIBS"; \
 	else \
 		mkdir -p ~/.local/bin; \
 		cp dist/$(X86_64_ELF_NAME) ~/.local/bin/hypotenuse; \
@@ -313,8 +313,8 @@ full-install-x86_64-elf: build-x86_64-elf
 		echo "Installed Linux x86_64 ELF compiler to ~/.local/bin/hypotenuse"; \
 		mkdir -p ~/.local/lib/PLIBS; \
 		echo "Created ~/.local/lib/PLIBS"; \
-		cp -r plstd ~/.local/lib/PLIBS/; \
-		echo "Copied plstd folder to ~/.local/lib/PLIBS"; \
+		cp -r bracket ~/.local/lib/PLIBS/; \
+		echo "Copied bracket folder to ~/.local/lib/PLIBS"; \
 		echo "Add ~/.local/bin to your PATH if not already present"; \
 	fi
 

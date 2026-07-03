@@ -1,6 +1,7 @@
 using "streamer_x86"
 
 #include <stddef.h>
+expose streams_impl_x86@streamer_x86
 
 space streams {
     int sys_read(int fd, string buf, int count) {
@@ -24,7 +25,7 @@ space streams {
     }
 
     string read_file(int fd) {
-        dynam char buffer = [];
+        string buffer = [];
         char tmp[256];
         int n;
         while ((n = sys_read(fd, tmp, 256)) > 0) {

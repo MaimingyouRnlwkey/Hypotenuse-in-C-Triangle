@@ -1,4 +1,5 @@
 using "string_x86"
+expose string_impl_x86@string_x86
 
 int strcmp(string a, string b) {
     return __strcmp_asm@string_impl_x86(a, b);
