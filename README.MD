@@ -1,4 +1,4 @@
-# The Hypotenuse Compiler - Self Host Variant
+# The ypotenuse Compiler - Self Host Variant
 
 <p align="center">
   <img src="assets/logo.png" alt="C△ Logo"/>
