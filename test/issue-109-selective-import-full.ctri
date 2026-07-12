@@ -1,5 +1,4 @@
-using strlen from <plstd>;
-using printd from <plstd>;
+using <plstd>;
 int main() {
     string s = "hello";
     int l = strlen@lib(s);
