@@ -1,0 +1,7 @@
+using printd from <plstd>;
+using string from <plstd>;
+
+int main() {
+    printd(42);
+    return 0;
+}

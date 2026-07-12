@@ -3014,7 +3014,23 @@ class CodeGen:
         self._emit(f"{header} {{")
         self._indent += 1
         for field_type, field_name in fields:
-            self._emit(f"{field_type} {field_name};")
+            # Handle dynam types in struct fields: generate helper struct and use struct name
+            if field_type.startswith("dynam "):
+                elem_type = field_type[6:]  # Get element type (after "dynam ")
+                mapped_elem = self._map_type(elem_type)
+                struct_name = self._get_dynam_struct_name(elem_type)
+                
+                # Ensure dynam helper functions are generated
+                if struct_name not in self._generated_dynam_structs:
+                    self._generated_dynam_structs.add(struct_name)
+                    self._gen_dynam_helper_functions(struct_name, mapped_elem, elem_type)
+                
+                # Use the dynam struct name as the field type
+                self._emit(f"{struct_name} {field_name};")
+            else:
+                # For regular types, apply standard type mapping
+                mapped_type = self._map_type(field_type)
+                self._emit(f"{mapped_type} {field_name};")
         self._indent -= 1
         self._emit("};")  # struct definition always ends with ;
 

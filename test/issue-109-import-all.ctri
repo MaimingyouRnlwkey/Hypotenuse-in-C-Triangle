@@ -1,0 +1,6 @@
+using <plstd>;
+
+int main() {
+    printd(42);
+    return 0;
+}
