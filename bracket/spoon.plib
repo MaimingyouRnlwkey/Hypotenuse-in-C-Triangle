@@ -94,8 +94,7 @@ space _sp {
 
     // Raw clone syscall
     // 4th arg (child_tid) arrives in rcx but syscall needs it in r10
-    asm int clone_p(unsigned long flags, void* child_stack,
-                    int* parent_tid, int* child_tid, unsigned long tls) {
+    asm int clone_p(unsigned long flags, void* child_stack, int* parent_tid, int* child_tid, unsigned long tls) {
         syntax x86_64_elf
         section .text
         mov rax, 56
