@@ -6,9 +6,9 @@
 
 ## What is C△?
 
-Hypotenuse is the compiler for **C△ (C Triangle)** — a new systems programming language born out of frustration with C's featurelessness and C++'s overwhelming complexity. A middle ground had to be born!
+Hypotenuse is the compiler for **C△ (C Triangle)** — a new systems programming language born out of frustration with C's lack of features and C++'s overwhelming complexity.
 
-C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, modern, and designed to be learnable.
+C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, kinda modern? And designed to be learnable.
 
 > _The future of C and the end of C++_
 
