@@ -8,7 +8,9 @@
 
 ## This is the self-hosted version
 
-This variant of the compiler will contain more features, which also means more bugs...
+C△ compiles to **C + assembly**, uses **GCC and NASM**, and targets **Linux ELF x86_64** natively. It's C-compatible, kinda modern? And designed to be learnable.
+
+> _The future of C and the end of C++_
 
 ---
 
