@@ -95,7 +95,7 @@ jobs:
           release_name: "Weekly prerelease ${{ steps.version.outputs.version }}"
           body: |
             Weekly pre-release packages built every Friday.
-            Includes Makefile, bracket library, and the actual compiler binary.
+            Includes Makefile, plstd library, and the actual compiler binary.
             **Could be unstable, use with caution!**
           draft: false
           prerelease: true
