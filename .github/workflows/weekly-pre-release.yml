@@ -9,31 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-macos:
-    name: Build macOS release package
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build macOS binary
-        run: make build
-
-      - name: Package macOS release
-        run: |
-          mkdir -p release/package
-          cp makefile.weekly release/package/makefile
-          cp -r plstd release/package/
-          cp dist/hypotenuse release/package/
-          cd release/package
-          zip -r ../hypotenuse-macos.zip makefile plstd hypotenuse
-
-      - name: Upload macOS package
-        uses: actions/upload-artifact@v4
-        with:
-          name: hypotenuse-macos
-          path: release/hypotenuse-macos.zip
-
   build-x86_64:
     name: Build x86_64 release package
     runs-on: ubuntu-latest
