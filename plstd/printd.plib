@@ -10,14 +10,6 @@ asm int sys_write(int fd, string buf, int count) {
     ret
 }
 
-asm int sys_write_arm64(int fd, string buf, int count) {
-    syntax arm64_macho
-    .section __TEXT,__text
-    mov x16, #4
-    svc #0x80
-    ret
-}
-
 void print_c(char c) { 
     sys_write(1, &c, 1);
 }
