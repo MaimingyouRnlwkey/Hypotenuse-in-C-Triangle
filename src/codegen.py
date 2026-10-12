@@ -1652,6 +1652,72 @@ class CodeGen:
                         if lib_key in exposed_keys:
                             break
 
+    def _should_emit_plib_function(
+        self,
+        lib_key: str,
+        original_name: str,
+        generated_name: str,
+        is_exposed: bool = False,
+    ) -> bool:
+        """Return True when a plib function should be emitted for the current build."""
+        if is_exposed:
+            return True
+
+        bare_name = original_name
+        if generated_name.startswith(f"{lib_key}_"):
+            bare_name = generated_name[len(lib_key) + 1 :]
+        elif original_name.startswith(f"{lib_key}_"):
+            bare_name = original_name[len(lib_key) + 1 :]
+
+        return (
+            bare_name in self._used_functions
+            or generated_name in self._used_functions
+            or original_name in self._used_functions
+        )
+
+    def _scan_plib_function_dependencies(self, node, current_space=None):
+        """Walk a function body and mark any called library functions as used."""
+        if node is None:
+            return
+
+        seen = set()
+        old_space = self._current_space
+        old_local_funcs = self._space_local_functions.copy()
+        if current_space is not None:
+            self._current_space = current_space
+            self._space_local_functions = set()
+
+        def visit(value):
+            if value is None or id(value) in seen:
+                return
+            seen.add(id(value))
+
+            if isinstance(value, Call):
+                self._expr(value)
+                return
+
+            if isinstance(value, list):
+                for item in value:
+                    visit(item)
+                return
+
+            if isinstance(value, tuple):
+                for item in value:
+                    visit(item)
+                return
+
+            if not hasattr(value, "__dict__"):
+                return
+
+            for item in vars(value).values():
+                if isinstance(item, (str, int, float, bool, type(None))):
+                    continue
+                visit(item)
+
+        visit(node)
+        self._current_space = old_space
+        self._space_local_functions = old_local_funcs
+
     def _resolve_scoped_var_import(self, owner, symbol):
         """Return the generated C name for an intra-file variable import."""
         if self.structor is None:
