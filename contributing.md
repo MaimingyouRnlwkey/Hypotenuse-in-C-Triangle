@@ -47,10 +47,11 @@ Tests live in the `test/` directory. Add a test for any bug you fix or feature y
 
 ## ✍️ Code Style
 
-- Follow PEP-8
-- Code like Yoda from Star Wars
-- Keep everything safe and tidy
-- Comment your code
+- 🐍 Python 3 — follow PEP 8
+- 📝 Document new functions and classes with docstrings
+- 🧹 Keep functions focused — one responsibility per function
+- 🔑 Use descriptive variable names
+- 💬 Leave comments for non-obvious logic
 
 ---
 
@@ -61,6 +62,7 @@ Tests live in the `test/` directory. Add a test for any bug you fix or feature y
 ├── 📂 src/          ← compiler source (lexer, parser, structurer, main)
 ├── 📂 docs/         ← language and compiler documentation
 ├── 📂 test/         ← test files
+├── 📂 vsix/         ← vscode extension folder
 ├── 📂 plstd/        ← plus standard library
 ├── 📂 assets/       ← logo and media
 ├── 📄 makefile      ← build and test targets

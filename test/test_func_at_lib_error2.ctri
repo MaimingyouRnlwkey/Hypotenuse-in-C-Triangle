@@ -1,6 +1,6 @@
 using "../plstd/string"
 
-int main() {
+int test_at_start() {
     string s = "test";
     // This should fail - @ at start
     int bad = @string_strlen(s);

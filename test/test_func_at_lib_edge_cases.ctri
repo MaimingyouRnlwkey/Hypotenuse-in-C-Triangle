@@ -1,6 +1,6 @@
 using "../plstd/string"
 
-int main() {
+int test_edge_cases() {
     string s = "test";
     
     // Test func@lib without arguments
